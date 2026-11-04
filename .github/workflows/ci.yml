@@ -1,0 +1,105 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  policy:
+    name: Policy (trailers, media)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Every commit carries the Assisted-by trailer and no AI co-author lines
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          # Separate statements so that a failing rev-list stops the step (fail closed).
+          all_commits="$(git rev-list "$BASE_SHA..$HEAD_SHA")"
+          own_commits="$(git rev-list --no-merges "$BASE_SHA..$HEAD_SHA")"
+          fail=0
+          # AI co-author and "Generated with" lines are refused in every commit, merges included.
+          for c in $all_commits; do
+            if git log -1 --format='%B' "$c" | grep -qiE '^co-authored-by:.*(claude|anthropic)|generated with .*claude'; then
+              echo "::error::$c ($(git log -1 --format='%s' "$c")) has an AI 'Co-Authored-By' or 'Generated with' line."
+              fail=1
+            fi
+          done
+          # Dependabot PRs are exempt from the trailer (decided by the PR author, which commits cannot spoof).
+          if [ "$PR_AUTHOR" != "dependabot[bot]" ]; then
+            for c in $own_commits; do
+              trailer="$(git log -1 --format='%(trailers:key=Assisted-by,valueonly)' "$c" | tr -d '[:space:]')"
+              if [ -z "$trailer" ]; then
+                echo "::error::$c ($(git log -1 --format='%s' "$c")) has no 'Assisted-by:' trailer."
+                fail=1
+              fi
+            done
+          fi
+          exit "$fail"
+
+      - name: No media outside examples/sample-library/
+        run: |
+          # quotePath=false keeps non-ASCII file names unquoted, so the patterns match them.
+          bad="$(git -c core.quotePath=false ls-files | grep -iE '\.(png|jpe?g|gif|webp|avif|bmp|ico|tiff?|heic|svg|mp4|webm|mov|m4v|mkv|avi)$' | grep -v '^examples/sample-library/' || true)"
+          if [ -n "$bad" ]; then
+            echo "::error::Media files are only allowed under examples/sample-library/:"
+            echo "$bad"
+            exit 1
+          fi
+
+      - name: No build artifacts (they embed local machine paths)
+        run: |
+          bad="$(git -c core.quotePath=false ls-files | grep -E '(^|/)__pycache__/|\.py[cod]$|\.tsbuildinfo$' || true)"
+          if [ -n "$bad" ]; then
+            echo "::error::Build artifacts must not be committed:"
+            echo "$bad"
+            exit 1
+          fi
+
+  tooling:
+    name: Workflow tooling (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: pre-push hook behaves the same on every platform
+        shell: bash
+        run: sh .github/scripts/test-pre-push.sh
+      - name: loop.py selection logic
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then py=python; else py=python3; fi
+          "$py" --version
+          "$py" -m unittest discover -s scripts -p 'test_*.py' -v
+
+  zizmor:
+    name: Workflow audit (zizmor)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: zizmorcore/zizmor-action@53290badfa369cb0bf7ad16342cb62c2fa47ac7b # v0.8.0
+        with:
+          version: 1.31.1
+          advanced-security: false

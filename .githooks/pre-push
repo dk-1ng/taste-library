@@ -1,0 +1,33 @@
+#!/bin/sh
+# Refuses pushes to main and non-fast-forward (force) pushes.
+# POSIX sh: runs under Git's own shell on Linux, macOS and Windows.
+# Enable once per clone: git config core.hooksPath .githooks
+
+zero=0000000000000000000000000000000000000000
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+  # Deleting a remote branch: allowed (merged branches are deleted).
+  case "$local_sha" in
+    0000000*) continue ;;
+  esac
+
+  if [ "$remote_ref" = "refs/heads/main" ]; then
+    echo "pre-push: refusing to push to main. Open a pull request instead." >&2
+    exit 1
+  fi
+
+  # Existing remote branch: the push must be a fast-forward.
+  if [ "$remote_sha" != "$zero" ] && ! echo "$remote_sha" | grep -q '^0*$'; then
+    if git cat-file -e "$remote_sha" 2>/dev/null; then
+      if ! git merge-base --is-ancestor "$remote_sha" "$local_sha"; then
+        echo "pre-push: refusing a non-fast-forward (force) push to $remote_ref." >&2
+        exit 1
+      fi
+    else
+      echo "pre-push: remote $remote_ref has commits you have not fetched; fetch and rebase first." >&2
+      exit 1
+    fi
+  fi
+done
+
+exit 0
