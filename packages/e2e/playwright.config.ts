@@ -6,6 +6,7 @@ export default defineConfig({
   testDir: "./tests",
   testMatch: "**/*.e2e.ts",
   fullyParallel: true,
+  forbidOnly: !!process.env.CI,
   retries: 0,
   reporter: "list",
   outputDir: "./test-results",
