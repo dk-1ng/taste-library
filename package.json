@@ -9,9 +9,17 @@
   },
   "scripts": {
     "build": "pnpm -r build",
-    "clean": "tsc -b --clean"
+    "clean": "tsc -b --clean",
+    "lint": "biome lint --error-on-warnings .",
+    "format": "biome format --write .",
+    "format:check": "biome format .",
+    "typecheck": "tsc -b",
+    "test": "pnpm -r --if-present test",
+    "check": "pnpm lint && pnpm format:check && pnpm typecheck && pnpm test && pnpm build",
+    "prepare": "node scripts/setup-hooks.mjs"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.6.4",
     "@types/node": "26.6.6",
     "typescript": "6.0.3"
   }
