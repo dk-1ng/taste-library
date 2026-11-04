@@ -30,6 +30,8 @@ packages/
   web/      user interface (React), translations en / pt-BR
   cli/      the `tastelib` command (init, open, doctor, validate, process, export, ...)
   mcp/      MCP connector for any agent
+  testkit/  dev-only test helpers: generated fixtures, non-ASCII temp directories
+  e2e/      end-to-end tests (Playwright)
 agent-kit/
   claude-code/   Claude Code plugin (commands and skills)
   AGENTS.md      the same instructions for other agents
@@ -48,22 +50,26 @@ Planned building blocks (each confirmed or replaced when its milestone starts): 
 | TypeScript | 6.0.3 | root `devDependencies`, exact version |
 | `@types/node` | 26.6.6 | root `devDependencies`, exact version |
 | Biome | 2.6.4 | root `devDependencies`, exact version |
+| Vitest | 5.1.0 | root `devDependencies`, exact version |
+| `@playwright/test` | 1.64.1 | root `devDependencies`, exact version |
 
 - Versions are exact (`savePrefix: ''`), the lockfile is committed and CI installs with `--frozen-lockfile`.
 - pnpm settings live in `pnpm-workspace.yaml`. There is no `.npmrc`: since pnpm 11 it is read only for registry and authentication settings.
-- Shared development tools (TypeScript, type packages, later the linter and the test runner) are root `devDependencies`. Packages declare only their runtime dependencies.
+- Shared development tools (TypeScript, type packages, later the linter and the test runner) are root `devDependencies`. Packages declare only their runtime dependencies, plus `@tastelib/testkit` as a `devDependency` when they have tests.
 - No dependency runs install scripts today. A dependency that needs one must be listed in `allowBuilds` in `pnpm-workspace.yaml` (pnpm refuses unlisted ones), with the reason recorded in the same change.
 
 ### Packages and dependency graph
 
-Every package is `@tastelib/<folder>`, `private`, version `0.0.0`, `"type": "module"`, with one `exports` entry (`types` → `./dist/index.d.ts`, `default` → `./dist/index.js`). The names are internal and can change with the final name (§16).
+Every package is `@tastelib/<folder>`, `private`, version `0.0.0`, `"type": "module"`, with one `exports` entry (`types` → `./dist/index.d.ts`, `default` → `./dist/index.js`); `e2e` has none, because nothing imports it. The names are internal and can change with the final name (§16).
 
 | Package | Depends on |
 | --- | --- |
-| `core` | nothing (no other workspace package, ever) |
+| `core` | nothing at run time (no other workspace package, ever); may list `testkit` as a `devDependency` |
 | `server` | `core` |
 | `mcp` | `core` |
 | `cli` | `core`, `server` (`tastelib open` starts the server) |
+| `testkit` | nothing |
+| `e2e` | `testkit` (`devDependency`) |
 | `web` | nothing yet (it runs in the browser, so it can use `core` only through a browser-safe entry point, decided when first needed) |
 
 Each edge is both a `workspace:*` dependency and a TypeScript project reference. The graph has no cycles. `agent-kit/` is not a workspace package (it holds no TypeScript) and arrives in M3.
@@ -86,7 +92,7 @@ Each edge is both a `workspace:*` dependency and a TypeScript project reference.
 - `pnpm check` is the single gate, run locally, by agents (loop step 5) and in CI: `pnpm lint && pnpm format:check && pnpm typecheck && pnpm test && pnpm build`. It stops at the first failure and exits non-zero.
 - Biome does both linting (`recommended` rules; `pnpm lint` fails on warnings too) and formatting (2 spaces, double quotes, semicolons, 100 columns, LF). `pnpm format` rewrites files; `pnpm lint` and `pnpm format:check` only report.
 - Biome is limited to code and data files (`.ts`, `.tsx`, `.js`, `.mjs`, `.json`), listed in `biome.json`. Markdown and YAML are not touched: it would reflow tables and prose in the design documents. It honors `.gitignore`.
-- `pnpm typecheck` is `tsc -b`. `pnpm test` runs each package's `test` script when it has one (`pnpm -r --if-present test`); the test runner arrives with the test infrastructure (§15).
+- `pnpm typecheck` is `tsc -b`. `pnpm test` runs each package's `test` script when it has one (`pnpm -r --if-present test`); the test layout is in §15.
 - `pnpm install` runs `prepare`, which runs `scripts/setup-hooks.mjs`: it sets `core.hooksPath` to `.githooks` in a Git checkout and does nothing elsewhere. New clones get the hooks without a manual step.
 - Dependabot watches the npm ecosystem weekly with a 7-day cooldown, groups development dependencies into one PR and uses the `chore(deps)` prefix.
 
@@ -198,10 +204,10 @@ See [SECURITY.md](../SECURITY.md) for the sensitive surfaces. The local server l
 
 ### Test layout
 
-- **Unit tests** use Vitest (5.1.0). They sit next to the code as `src/<name>.test.ts`, are excluded from each package's build (`tsconfig.json` excludes them) and are type-checked by a `tsconfig.test.json` in the package (see `packages/testkit`). Every package has `"test": "vitest run --passWithNoTests"`; the root `pnpm test` runs them all and is part of `pnpm check` (§3). A package that gets its first test also gets `tsconfig.test.json`, its reference in the root `tsconfig.json`, and a `devDependencies` entry for `@tastelib/testkit`.
-- **End-to-end tests** use Playwright (`@playwright/test` 1.64.1) in `packages/e2e`, as `tests/*.e2e.ts`. They are not part of `pnpm check`, because they need a browser download (about 120 MiB). First time: `pnpm test:e2e:install`; then `pnpm test:e2e`. Each test starts its own local HTTP server on an OS-assigned port and serves generated content; nothing touches the network. The package has no `test` script on purpose, so `pnpm test` skips it.
+- **Unit tests** use Vitest (5.1.0). They sit next to the code as `src/<name>.test.ts`, are excluded from each package's build (`tsconfig.json` excludes them) and are type-checked by a `tsconfig.test.json` in the package (see `packages/testkit`). Every package except `e2e` has a `test` script (`vitest run`, with `--passWithNoTests` while a package has no tests yet); the root `pnpm test` runs them all and is part of `pnpm check` (§3). A package that gets its first test also gets `tsconfig.test.json`, its reference in the root `tsconfig.json`, and a `devDependencies` entry for `@tastelib/testkit`.
+- **End-to-end tests** use Playwright (`@playwright/test` 1.64.1) in `packages/e2e`, as `tests/*.e2e.ts`. They are not part of `pnpm check`, because they need a browser download (about 120 MiB). First time: `pnpm test:e2e:install`; then `pnpm test:e2e`, which builds `testkit` first because the tests import its `dist/`. Each test starts its own local HTTP server on an OS-assigned port and serves generated content; nothing touches the network. The package has no `test` script on purpose, so `pnpm test` skips it.
 - **Shared helpers** live in `packages/testkit` (`@tastelib/testkit`, private, dev-only). It has no workspace dependencies and nothing ever lists it under `dependencies`. `core` stays free of other workspace packages at runtime; once `core` has tests it lists `testkit` as a `devDependency` only (a test-time edge, not part of the dependency graph in §3). It offers:
-  - `makePng(width, height, seed)` and `makeBmp(width, height, seed)`: valid images built byte by byte (no image library), deterministic per seed. JPEG and WebP fixtures arrive with the encoder chosen for compression (M2).
+  - `makePng(width, height, seed)` and `makeBmp(width, height, seed)`: valid images built byte by byte (no image library), deterministic per seed (same pixels; PNG bytes are stable only within one Node version, because zlib output can change, so tests that need exact bytes use `makeBmp`). JPEG and WebP fixtures arrive with the encoder chosen for compression (M2).
   - `makeHtmlPage({ title, body, images, crlf })`: small HTML pages, with either line ending.
   - `createSeededRandom(seed)`: the PRNG behind the images (mulberry32).
   - `withTempDir(fn)`: a fresh temporary directory whose path contains non-ASCII characters (`.../Usuário-日本`), removed afterwards.
@@ -247,5 +253,6 @@ The check command is in §3.
 | 2026-11-04 | pnpm 12.16.1 pinned by `packageManager`; pnpm fetches the pinned version itself. | Corepack: no longer shipped with Node 25 and later. A global pnpm with no pin: versions drift between machines and CI. |
 | 2026-11-04 | TypeScript 6.0.3, with a configuration that already builds unchanged on 7.0. Revisit when the linter chosen in M0 supports TypeScript 7. | TypeScript 7.0.2 (native compiler): no stable programmatic API until 7.1, and `typescript-eslint` 8.72 accepts only `typescript <6.1.0`. Speed does not matter at this size. Running both compilers (7 to build, 6 for tools): two type checkers that can disagree. |
 | 2026-11-04 | Biome 2.6.4 for lint and format. It has its own parser and does not depend on the `typescript` package, so the TypeScript 7 move is not blocked by the linter. | ESLint + Prettier + `typescript-eslint`: three tools and about a dozen dependencies, and `typescript-eslint` ties the linter to the TypeScript version (see the TypeScript row). Biome's type-aware rules are weaker; `tsc` already covers type errors. |
+| 2026-11-04 | Weak-copyleft dependencies (MPL-2.0) are accepted when they are development-only, unmodified and not bundled. First case: `lightningcss`, pulled by Vite through Vitest (and later by the `web` build). | Keeping hard rule 7 strict: it would exclude Vite and Vitest for one transitive CSS tool. A test runner without Vite (`node:test`): weaker tooling, and `web` brings the same package anyway. |
 | 2026-11-04 | Packages build with `tsc -b` and project references, emitting `dist/` with declarations. | A bundler (tsup, tsdown, Rolldown) for the Node packages: an extra dependency that emits nothing `tsc` cannot. Bundling for distribution is decided at release (M7). Source-only packages run through a loader: the CLI and the MCP connector must run on plain Node. |
 | 2026-11-04 | Vitest for unit tests (in `pnpm check`), Playwright for end-to-end tests (separate `pnpm test:e2e`), shared fixture helpers in a dev-only `packages/testkit`, images built by hand (PNG, BMP) instead of with an image library. | Jest (slower with ESM and TypeScript); Playwright inside `pnpm check` (forces a 120 MiB browser download on every install and CI run); helpers copied into each package; `sharp` or `pngjs` for fixtures (a native or extra dependency for something about 60 lines do). |

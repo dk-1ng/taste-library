@@ -46,7 +46,7 @@ function pngChunk(type: string, body: Uint8Array): Buffer {
   return out;
 }
 
-/** A valid 8-bit RGB PNG of the given size; the same arguments always give the same bytes. */
+/** A valid 8-bit RGB PNG of the given size; the same arguments always give the same pixels (the compressed bytes are stable only within one Node version). */
 export function makePng(width: number, height: number, seed = 1): Buffer {
   const rgb = pixels(width, height, seed);
   const stride = width * 3;
