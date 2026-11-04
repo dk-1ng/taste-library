@@ -1,0 +1,27 @@
+{
+  "compilerOptions": {
+    "target": "es2025",
+    "lib": ["es2025"],
+    "module": "nodenext",
+    "types": [],
+
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "erasableSyntaxOnly": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+
+    "composite": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+
+    "rootDir": "${configDir}/src",
+    "outDir": "${configDir}/dist",
+    "tsBuildInfoFile": "${configDir}/dist/tsconfig.tsbuildinfo"
+  },
+  "include": ["${configDir}/src"]
+}
