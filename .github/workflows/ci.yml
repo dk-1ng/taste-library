@@ -62,8 +62,8 @@ jobs:
             exit 1
           fi
 
-  hooks:
-    name: Git hooks (${{ matrix.os }})
+  tooling:
+    name: Workflow tooling (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
@@ -76,6 +76,12 @@ jobs:
       - name: pre-push hook behaves the same on every platform
         shell: bash
         run: sh .github/scripts/test-pre-push.sh
+      - name: loop.py selection logic
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then py=python; else py=python3; fi
+          "$py" --version
+          "$py" -m unittest discover -s scripts -p 'test_*.py' -v
 
   zizmor:
     name: Workflow audit (zizmor)

@@ -13,7 +13,7 @@ Out of scope: hosting or sharing libraries online, scraping sites in bulk, bundl
 These are non-negotiable. `CLAUDE.md` holds the full wording.
 
 1. No third-party media in this repository, its issues or its PRs. Tests generate their images at runtime.
-2. Nothing personal: no names, real projects, real briefings or machine paths.
+2. Nothing personal: no names, real projects, real briefings or machine paths. (Your own Git author identity is fine.)
 3. Briefings yield intent only; visual decisions are filtered out.
 4. The user's words are stored verbatim; interpretation is kept separate.
 5. Local and private: no telemetry, no remote code, no account, works offline.
@@ -77,6 +77,8 @@ git config core.hooksPath .githooks
 ```
 
 The `pre-push` hook refuses pushes to `main` and force pushes. The toolchain (Node, pnpm, the check command) is set up in milestone M0 and documented here when it lands.
+
+Maintainer workflow helpers live in `scripts/` (Python 3.9+, standard library only, plus the GitHub CLI): `python3 scripts/loop.py status` shows what the per-issue loop should do next. Their tests run with `python3 -m unittest discover -s scripts`.
 
 ## Code standards
 

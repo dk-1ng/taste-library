@@ -128,7 +128,7 @@ The interface is in English with a Brazilian Portuguese option from the first re
 ## 13. Portability
 
 - Linux and Windows are both first-class (macOS is expected to work).
-- No script that runs on only one operating system. Git hooks are POSIX `sh`, which Git runs on every platform.
+- No script that runs on only one operating system. Git hooks are POSIX `sh`, which Git runs on every platform. Workflow helper scripts are Python (standard library only), which runs on every platform.
 - Text files use LF (`.gitattributes`); the tool reads either line ending.
 - Paths with non-ASCII characters (for example `Usuário`) are tested in CI.
 
@@ -178,3 +178,6 @@ See [SECURITY.md](../SECURITY.md) for the sensitive surfaces. The local server l
 | 2026-11-04 | `docs/design.md` is the source of truth and holds this decision log; `docs/format-spec.md` is the separate data contract. | Separate ADR files: the same decision would be written in two places. |
 | 2026-11-04 | Issue-driven workflow: one issue, one branch, one squash-merged PR, reviewed by a separate agent. | Direct commits to `main`. |
 | 2026-11-04 | Until the repository is public, `main` is protected by Claude Code permission rules, a `pre-push` hook and merging only on green CI; a GitHub ruleset is enabled at M7. | Paid plan for branch protection on a private repository. |
+| 2026-11-04 | One issue per session: the maintainer runs `/clear` after each issue and types `continue`; `scripts/loop.py status` reads GitHub and says what to resume or start. | Relying on the agent's memory of earlier sessions. |
+| 2026-11-04 | Workflow helper scripts are Python, standard library only; product code stays TypeScript. | Shell scripts (not portable to Windows); TypeScript before the toolchain exists in M0. |
+| 2026-11-04 | The maintainer's own Git identity in commits is allowed under the "nothing personal" rule. | Rewriting history to a handle-only identity. |

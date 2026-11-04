@@ -5,7 +5,7 @@ These rules are binding for every session and every agent. Re-read them at the s
 ## Hard rules
 
 1. **No third-party media in this repository.** No screenshots, captures, videos or design references from anyone else: not in commits, not in issues, not in PRs. Tests generate their images at runtime. The only media allowed is under `examples/sample-library/`: the maintainer's own or freely licensed files, each with its source and license recorded.
-2. **Nothing personal in this repository.** No names, real client projects, real briefings, machine paths (for example `C:\Users\<name>\...`) or personal setup details, in code, docs, issues, PRs or commits.
+2. **Nothing personal in this repository.** No names, real client projects, real briefings, machine paths (for example `C:\Users\<name>\...`) or personal setup details, in code, docs, issues, PRs or commits. The maintainer's own Git identity (author name and noreply email) is allowed.
 3. **Briefings yield intent only.** What, for whom, what users must do, why. Styles, colors, fonts and named visual directions from a briefing never reach the intent; they are listed as discarded.
 4. **The user's words never change.** Notes and pin notes are stored verbatim. Agent interpretation is stored separately and marked `to-review` until the user accepts or corrects it.
 5. **Local and private.** No telemetry, no remote code loaded at runtime, no account. Works offline; the network is used only for a URL capture the user asks for.
@@ -49,30 +49,43 @@ Everything in this repository is in English: code, comments, docs, issues, commi
 - A bug that survived one fix goes to `architect`.
 - Never use effort `max` or the `fable` model unless the maintainer asks.
 - Subagents start with no conversation context. Every prompt states the issue number, the branch, the decisions already made, and "read `CLAUDE.md` and `docs/design.md` first; they are binding".
-- Agent boundaries: only the main session pushes, opens PRs, switches branches, edits labels or merges. `architect` and `implementer` never do.
+- Agent boundaries: only the main session pushes, opens PRs, switches branches or merges. Labels and the board are changed only by the main session (through `scripts/loop.py`) and `tracker`. `architect`, `implementer`, `test-engineer`, `translator` and `reviewer` never do any of these.
+
+## Sessions: clear and continue
+
+One issue per session. A new session knows nothing about the previous one; everything it needs is in this file, in GitHub (labels, board, issue comments, branches, PRs) and in `scripts/loop.py`.
+
+- When the maintainer types **"continue"**, run the loop below from step 1, without asking what to do.
+- When an issue is finished (step 10), or when the session must stop, say so and tell the maintainer to run `/clear` and type `continue`.
+- `scripts/loop.py` is Python (standard library only) and needs `gh`. Run it as `python3 scripts/loop.py <command>` on Linux and macOS, `py scripts/loop.py <command>` on Windows.
 
 ## The loop ("continue")
 
 When the maintainer says "continue":
 
-1. **Find the issue.** Resume the one labeled `status: in progress` (read its comments to see where it stopped). Otherwise take the next issue (see Tracking). If it is a checkpoint, stop and say so.
+1. **Find the issue.** Run `python3 scripts/loop.py status`. It prints one of:
+   - `RESUME #N`: an issue is in progress. Read its last comment, its branch and its open PR (all printed) and continue from where it stopped.
+   - `START #N`: the next issue. Read it with `gh issue view N`.
+   - `stop at checkpoint #N`: tell the maintainer the real-use test is due; do nothing else.
+   - `stop` (all blocked) or `nothing planned`: tell the maintainer and wait.
+   Fix any `WARNING` it prints first (for example, enable the hooks).
 2. **Check the routing rule** above; warn if needed.
-3. **`tracker`** marks the issue in progress. The main session updates `main` (`git switch main && git pull --ff-only`) and creates `<type>/<issue>-short-description`.
+3. **Start:** `python3 scripts/loop.py start N` (label + board). Update `main` (`git switch main && git pull --ff-only`) and create `<type>/<issue>-short-description`. When resuming, switch to the existing branch instead.
 4. **Route the work:** spike → `architect`; `complexity: high` → `architect` plans, then `implementer` on `opus`/`high`; test infrastructure → `test-engineer`; otherwise inline, or `implementer` if it spans many files.
 5. **Verify** with the project check command (defined in M0; until then, the CI policy checks) and every acceptance criterion.
 6. **`reviewer`** reviews the branch. On `CHANGES REQUESTED`, fix and review again.
 7. If `README.md` changed, **`translator`** updates `docs/pt-BR/README.md`.
-8. **Open the PR** (`Closes #N`, template filled, title = the Conventional Commit the squash will produce). Wait for CI with `gh pr checks <PR> --watch`; merge only when it is green. Ask the maintainer to approve the merge, then run `gh pr merge <PR> --squash --subject "<PR title> (#<PR>)" --body "<why, if useful>"` with a body that ends with a blank line and `Assisted-by: Claude Code`. Then `git switch main && git pull --ff-only`.
-9. **`tracker`** marks the issue done.
-10. Tell the maintainer the issue is finished and that this is a good moment to `/clear` and say "continue" again (one issue per session).
-11. If the session must stop mid-task, `tracker` posts a comment with the exact state: done, missing, files touched, next steps.
+8. **Open the PR** (`Closes #N`, template filled, title = the Conventional Commit the squash will produce). Wait for CI with `gh pr checks <PR> --watch`; merge only when it is green. Ask the maintainer to approve the merge, then run `gh pr merge <PR> --squash --subject "<PR title> (#<PR>)" --body "<why, if useful>"` with a body that ends with a blank line and `Assisted-by: Claude Code`. GitHub deletes the branch automatically. Then `git switch main && git pull --ff-only`.
+9. **Finish:** `python3 scripts/loop.py finish N`.
+10. Tell the maintainer, in Portuguese: the issue is finished, what was delivered, and that they should run `/clear` and type `continue`.
+11. If the session must stop mid-task, post the exact state with `python3 scripts/loop.py comment N "<done / missing / files touched / next steps>"` and push the branch, so the next session can resume.
 
 ## Protection of `main` (GitHub Free, private repository)
 
 GitHub does not enforce branch protection on private repositories on the Free plan. Until the repository is public (M7), `main` is protected by three layers:
 
 1. `.claude/settings.json` denies pushes to `main` and force pushes, and asks before merges and publishing.
-2. `.githooks/pre-push` refuses pushes to `main` and non-fast-forward pushes. Enable it once per clone: `git config core.hooksPath .githooks`.
+2. `.githooks/pre-push` refuses pushes to `main` and non-fast-forward pushes. Enable it once per clone: `git config core.hooksPath .githooks` (`scripts/loop.py status` warns when it is off).
 3. The loop merges only after the PR's CI is green (step 8).
 
 These layers can be bypassed by hand. Never work around them; if one blocks you, stop and tell the maintainer. In M7, enable a GitHub ruleset on `main`: require a PR, require CI, squash only, no force push.
