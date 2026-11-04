@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { constants } from "node:fs";
 import { lstat, mkdir, open, realpath, rename, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, parse, win32 } from "node:path";
@@ -19,8 +20,10 @@ function isCleanAbsolutePath(value: string): boolean {
   return !value.split(/[\\/]/).some((segment) => segment === "." || segment === "..");
 }
 
+const PATH_MESSAGE = 'must be an absolute path for this system, without "." or ".." segments';
+
 const absolutePath = z.string().min(1).refine(isCleanAbsolutePath, {
-  message: 'must be an absolute path for this system, without "." or ".." segments',
+  message: PATH_MESSAGE,
 });
 
 export const configSchema = z.strictObject({
@@ -105,7 +108,7 @@ export async function readConfig(file: string): Promise<Config> {
   let text: string;
   try {
     // One handle for the size check and the read, so a symbolic link or a change in between cannot bypass the limit.
-    const handle = await open(file, "r");
+    const handle = await open(file, constants.O_RDONLY | (constants.O_NONBLOCK ?? 0));
     try {
       const info = await handle.stat();
       if (!info.isFile()) throw new ConfigError(file, "is not a regular file");
@@ -143,6 +146,9 @@ export async function assertMediaOutsideGit(
   mediaPath: string,
   file = "config.json",
 ): Promise<void> {
+  if (!isCleanAbsolutePath(mediaPath)) {
+    throw new ConfigError(file, PATH_MESSAGE, "mediaPath");
+  }
   let current = mediaPath;
   // Resolve symbolic links on the nearest ancestor that exists.
   for (;;) {

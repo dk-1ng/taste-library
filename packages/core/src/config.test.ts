@@ -141,7 +141,14 @@ describe("reading hardening", () => {
       await writeFile(big, JSON.stringify({ version: 1, pad: "x".repeat(1024 * 1024) }));
       await expect(readConfig(big)).rejects.toThrow(/larger than/);
       const link = join(dir, "config.json");
-      await symlink(big, link, "file");
+      try {
+        await symlink(big, link, "file");
+      } catch (error) {
+        // A file symlink on Windows needs administrator rights or Developer Mode.
+        if (process.platform === "win32" && (error as NodeJS.ErrnoException).code === "EPERM")
+          return;
+        throw error;
+      }
       await expect(readConfig(link)).rejects.toThrow(/larger than/);
     });
   });
