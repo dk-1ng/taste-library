@@ -99,7 +99,7 @@ The code lives in `packages/` (`core`, `server`, `web`, `cli`, `mcp`), one works
 
 When you add a dependency, pnpm records the exact version (no `^` ranges) and the lockfile is committed. Shared development tools go in the root `package.json`; a package declares only what it needs at run time. Scripts in any `package.json` must run unchanged on Linux and Windows: no shell built-ins such as `rm` or `cp`, and no inline environment variables. `pnpm check` is the gate CI will run (wired in a later M0 issue); see `docs/design.md` §3.
 
-Maintainer workflow helpers live in `scripts/` (Python 3.9+, standard library only, plus the GitHub CLI): `python3 scripts/loop.py status` shows what the per-issue loop should do next. Their tests run with `python3 -m unittest discover -s scripts`.
+Maintainer workflow helpers live in `scripts/` (plain Node, no dependencies, plus the GitHub CLI): `node scripts/loop.mjs status` shows what the per-issue loop should do next. Their tests run with `pnpm test:scripts`.
 
 ## Code standards
 

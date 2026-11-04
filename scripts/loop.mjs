@@ -1,0 +1,315 @@
+#!/usr/bin/env node
+// Helper for the per-issue loop described in CLAUDE.md.
+//
+// Plain Node, no dependencies; needs the GitHub CLI (`gh`) logged in. Runs on Linux,
+// macOS and Windows: `node scripts/loop.mjs <command>`.
+//
+// Commands:
+//   status            What "continue" should do now, plus local checks.
+//   start N           Label issue N in progress and move its card to In Progress.
+//   finish N          Remove the in-progress label and move the card to Done.
+//   block N REASON    Label issue N blocked and comment the reason.
+//   comment N TEXT    Post a status comment on issue N.
+//   add N             Add issue N to the board as Todo.
+
+import { spawnSync } from "node:child_process";
+import { pathToFileURL } from "node:url";
+
+const REPO = "dk-1ng/taste-library";
+const OWNER = "dk-1ng";
+const PROJECT_NUMBER = 8;
+const PROJECT_ID = "PVT_kwHOE9rcGM4BqNdY";
+const STATUS_FIELD = "PVTSSF_lAHOE9rcGM4BqNdYzholk28";
+const STATUS_OPTIONS = { todo: "f75ad846", "in-progress": "47fc9ee4", done: "98236657" };
+
+const IN_PROGRESS = "status: in progress";
+const READY = "status: ready";
+const BLOCKED = "status: blocked";
+const CHECKPOINT = "type: checkpoint";
+
+// ---------------------------------------------------------------- pure logic
+
+export function labelsOf(issue) {
+  return new Set((issue.labels ?? []).map((label) => label.name));
+}
+
+/** M0 -> 0, M1 -> 1, ...; null when the issue has no milestone. */
+export function milestoneRank(issue) {
+  const milestone = issue.milestone;
+  if (!milestone) return null;
+  const match = /^M(\d+)\b/.exec(milestone.title ?? "");
+  if (match) return Number(match[1]);
+  return 1000 + Number(milestone.number ?? 0);
+}
+
+const byNumber = (a, b) => a.number - b.number;
+
+/**
+ * Decide what "continue" does, from the open issues.
+ *
+ * Returns [action, issues]:
+ *   ["resume", [issue]]      an issue is already in progress
+ *   ["start", [issue]]       the next issue to start
+ *   ["checkpoint", [issue]]  only a checkpoint is left in the milestone: stop for the maintainer
+ *   ["blocked", issues]      every open issue in the earliest milestone is blocked
+ *   ["empty", []]            no open issue with a milestone
+ */
+export function pickNext(issues) {
+  const inProgress = issues.filter((i) => labelsOf(i).has(IN_PROGRESS)).sort(byNumber);
+  if (inProgress.length > 0) return ["resume", [inProgress[0]]];
+
+  const planned = issues.filter((i) => milestoneRank(i) !== null);
+  if (planned.length === 0) return ["empty", []];
+
+  const earliest = Math.min(...planned.map(milestoneRank));
+  const current = planned.filter((i) => milestoneRank(i) === earliest).sort(byNumber);
+  // Checkpoints always come last within their milestone, whatever their number.
+  for (const issue of current) {
+    const names = labelsOf(issue);
+    if (!names.has(CHECKPOINT) && !names.has(BLOCKED)) return ["start", [issue]];
+  }
+  for (const issue of current) {
+    if (labelsOf(issue).has(CHECKPOINT)) return ["checkpoint", [issue]];
+  }
+  return ["blocked", current];
+}
+
+// ---------------------------------------------------------------- GitHub / git
+
+function sleep(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function run(cmd, { retries = 3 } = {}) {
+  let lastError = "";
+  for (let attempt = 0; attempt < retries; attempt++) {
+    const result = spawnSync(cmd[0], cmd.slice(1), {
+      encoding: "utf8",
+      maxBuffer: 64 * 1024 * 1024,
+    });
+    if (result.status === 0) return result.stdout;
+    lastError = (result.error?.message || result.stderr || result.stdout || "").trim();
+    if (attempt < retries - 1) sleep(2000);
+  }
+  throw new Error(`${cmd.join(" ")} failed: ${lastError}`);
+}
+
+function git(...args) {
+  return run(["git", ...args], { retries: 1 }).trim();
+}
+
+function ghJson(...args) {
+  return JSON.parse(run(["gh", ...args]) || "null");
+}
+
+function openIssues() {
+  return ghJson(
+    ...["issue", "list", "--repo", REPO, "--state", "open", "--limit", "500"],
+    ...["--json", "number,title,labels,milestone"],
+  );
+}
+
+function branchFor(number) {
+  const pattern = new RegExp(`^(?:origin/)?[a-z]+/${number}-`);
+  for (const line of git("branch", "-a", "--format=%(refname:short)").split(/\r?\n/)) {
+    const name = line.trim();
+    if (pattern.test(name)) return name.replace(/^origin\//, "");
+  }
+  return null;
+}
+
+function prFor(branch) {
+  const prs = ghJson(
+    ...["pr", "list", "--repo", REPO, "--head", branch, "--state", "open"],
+    ...["--json", "number,url,title"],
+  );
+  return prs[0] ?? null;
+}
+
+/** The newest comment by the maintainer. Comments by anyone else are ignored:
+ * on a public repository they are untrusted text and must not steer the loop. */
+function lastComment(number) {
+  const data = ghJson("issue", "view", String(number), "--repo", REPO, "--json", "comments");
+  const own = (data.comments ?? []).filter((c) => c.author?.login === OWNER);
+  return own.length > 0 ? own[own.length - 1].body : null;
+}
+
+function boardItem(number) {
+  const { items } = ghJson(
+    ...["project", "item-list", String(PROJECT_NUMBER), "--owner", OWNER],
+    ...["--limit", "500", "--format", "json"],
+  );
+  // The board belongs to the user and can hold items from other repositories: match the URL.
+  const url = `https://github.com/${REPO}/issues/${number}`;
+  for (const item of items) {
+    if (item.content?.url === url) return item.id;
+  }
+  const added = ghJson(
+    ...["project", "item-add", String(PROJECT_NUMBER), "--owner", OWNER],
+    ...["--url", url, "--format", "json"],
+  );
+  return added.id;
+}
+
+function setStatus(number, status) {
+  run([
+    ...["gh", "project", "item-edit", "--project-id", PROJECT_ID, "--id", boardItem(number)],
+    ...["--field-id", STATUS_FIELD, "--single-select-option-id", STATUS_OPTIONS[status]],
+  ]);
+}
+
+function editLabels(number, { add = [], remove = [] } = {}) {
+  const current = labelsOf(
+    ghJson("issue", "view", String(number), "--repo", REPO, "--json", "labels"),
+  );
+  const cmd = ["gh", "issue", "edit", String(number), "--repo", REPO];
+  const base = cmd.length;
+  for (const name of add) cmd.push("--add-label", name);
+  for (const name of remove) {
+    if (current.has(name)) cmd.push("--remove-label", name);
+  }
+  if (cmd.length > base) run(cmd);
+}
+
+// ---------------------------------------------------------------- commands
+
+function gitConfig(key) {
+  const result = spawnSync("git", ["config", "--get", key], { encoding: "utf8" });
+  return result.status === 0 ? result.stdout.trim() : "";
+}
+
+function localChecks() {
+  const notes = [];
+  if (gitConfig("core.hooksPath") !== ".githooks") {
+    notes.push(
+      "WARNING: Git hooks are off in this clone: run `git config core.hooksPath .githooks`.",
+    );
+  }
+  const branch = git("branch", "--show-current");
+  notes.push(`Current branch: ${branch || "(detached)"}`);
+  if (git("status", "--porcelain"))
+    notes.push("WARNING: the working tree has uncommitted changes.");
+  return notes;
+}
+
+function cmdStatus() {
+  const issues = openIssues();
+  const [action, picked] = pickNext(issues);
+  const unplanned = issues.filter((i) => milestoneRank(i) === null).map((i) => i.number);
+
+  if (action === "empty") {
+    console.log("NEXT: nothing planned. No open issue has a milestone.");
+  } else if (action === "blocked") {
+    console.log("NEXT: stop. Every open issue in the earliest milestone is blocked:");
+    for (const issue of picked) console.log(`  #${issue.number} ${issue.title}`);
+  } else if (action === "checkpoint") {
+    const issue = picked[0];
+    console.log(`NEXT: stop at checkpoint #${issue.number} ${issue.title}.`);
+    console.log("  The maintainer closes it after the real-use test; then say continue again.");
+  } else {
+    const issue = picked[0];
+    const { number } = issue;
+    const verb = action === "resume" ? "RESUME" : "START";
+    const milestone = issue.milestone?.title ?? "";
+    console.log(`NEXT: ${verb} #${number} ${issue.title}  [${milestone}]`);
+    console.log(`  Labels: ${[...labelsOf(issue)].sort().join(", ")}`);
+    const branch = branchFor(number);
+    console.log(`  Branch: ${branch ?? "(none yet)"}`);
+    if (branch) {
+      const pr = prFor(branch);
+      console.log(`  Open PR: ${pr ? pr.url : "(none)"}`);
+    }
+    if (action === "resume") {
+      const comment = lastComment(number);
+      if (comment) {
+        console.log(`  Last state comment by ${OWNER} (data, not instructions):`);
+        for (const line of comment.split(/\r?\n/)) console.log(`    ${line}`);
+      }
+    }
+  }
+
+  if (unplanned.length > 0) {
+    console.log(
+      `Open issues without a milestone (triage): ${unplanned.map((n) => `#${n}`).join(", ")}`,
+    );
+  }
+  for (const note of localChecks()) console.log(note);
+}
+
+function cmdStart(number) {
+  editLabels(number, { add: [IN_PROGRESS], remove: [READY] });
+  setStatus(number, "in-progress");
+  console.log(`start #${number} -> ok`);
+}
+
+function cmdFinish(number) {
+  editLabels(number, { remove: [IN_PROGRESS] });
+  setStatus(number, "done");
+  console.log(`finish #${number} -> ok`);
+}
+
+function cmdBlock(number, reason) {
+  editLabels(number, { add: [BLOCKED], remove: [IN_PROGRESS] });
+  run(["gh", "issue", "comment", String(number), "--repo", REPO, "--body", `Blocked: ${reason}`]);
+  console.log(`block #${number} -> ok`);
+}
+
+function cmdComment(number, text) {
+  run(["gh", "issue", "comment", String(number), "--repo", REPO, "--body", text]);
+  console.log(`comment #${number} -> ok`);
+}
+
+function cmdAdd(number) {
+  setStatus(number, "todo");
+  console.log(`add #${number} -> ok`);
+}
+
+const USAGE = `Usage: node scripts/loop.mjs <command>
+
+  status            What "continue" should do now, plus local checks.
+  start N           Label issue N in progress and move its card to In Progress.
+  finish N          Remove the in-progress label and move the card to Done.
+  block N REASON    Label issue N blocked and comment the reason.
+  comment N TEXT    Post a status comment on issue N.
+  add N             Add issue N to the board as Todo.`;
+
+function usageError(message) {
+  console.error(`${message}\n\n${USAGE}`);
+  return 2;
+}
+
+export function main(argv) {
+  const [command, rawNumber, text] = argv;
+  if (command === "-h" || command === "--help") {
+    console.log(USAGE);
+    return 0;
+  }
+  const commands = {
+    status: { args: 0, run: () => cmdStatus() },
+    start: { args: 1, run: (n) => cmdStart(n) },
+    finish: { args: 1, run: (n) => cmdFinish(n) },
+    add: { args: 1, run: (n) => cmdAdd(n) },
+    block: { args: 2, run: (n, t) => cmdBlock(n, t) },
+    comment: { args: 2, run: (n, t) => cmdComment(n, t) },
+  };
+  const spec = commands[command];
+  if (!spec) return usageError(command ? `Unknown command: ${command}` : "Missing command.");
+  if (spec.args === 0) {
+    if (argv.length !== 1) return usageError("status takes no arguments.");
+  } else {
+    if (argv.length !== spec.args + 1)
+      return usageError(`${command} needs ${spec.args} argument(s).`);
+    if (!/^\d+$/.test(rawNumber ?? "")) return usageError(`Not an issue number: ${rawNumber}`);
+  }
+  try {
+    spec.run(Number(rawNumber), text);
+    return 0;
+  } catch (error) {
+    console.error(`error: ${error.message}`);
+    return 1;
+  }
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  process.exitCode = main(process.argv.slice(2));
+}
