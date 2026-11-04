@@ -10,7 +10,8 @@
     }
   },
   "scripts": {
-    "build": "tsc -b"
+    "build": "tsc -b",
+    "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
     "@tastelib/core": "workspace:*"

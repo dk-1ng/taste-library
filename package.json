@@ -16,11 +16,15 @@
     "typecheck": "tsc -b",
     "test": "pnpm -r --if-present test",
     "check": "pnpm lint && pnpm format:check && pnpm typecheck && pnpm test && pnpm build",
-    "prepare": "node scripts/setup-hooks.mjs"
+    "prepare": "node scripts/setup-hooks.mjs",
+    "test:e2e": "pnpm --filter @tastelib/testkit build && pnpm --filter @tastelib/e2e e2e",
+    "test:e2e:install": "pnpm --filter @tastelib/e2e e2e:install"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.4",
+    "@playwright/test": "1.64.1",
     "@types/node": "26.6.6",
-    "typescript": "6.0.3"
+    "typescript": "6.0.3",
+    "vitest": "5.1.0"
   }
 }
