@@ -1,3 +1,13 @@
 // @tastelib/core: Data format: schemas, validated read/write, index, migrations.
-// Empty until its milestone lands (docs/design.md section 3).
-export {};
+export {
+  assertMediaOutsideGit,
+  type Config,
+  ConfigError,
+  type ConfigEnvironment,
+  configSchema,
+  DEFAULT_CONFIG,
+  parseConfig,
+  readConfig,
+  resolveConfigPath,
+  writeConfig,
+} from "./config.js";
