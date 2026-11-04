@@ -28,12 +28,16 @@ export function pickLanguage(preferred: readonly string[]): Language {
 }
 
 /** Looks up a message and fills `{name}` placeholders. */
+export function format(template: string, values: Readonly<Record<string, string | number>>) {
+  return template.replace(/\{(\w+)\}/g, (whole, name: string) =>
+    Object.hasOwn(values, name) ? String(values[name]) : whole,
+  );
+}
+
 export function translate(
   language: Language,
   key: MessageKey,
   values: Readonly<Record<string, string | number>> = {},
 ): string {
-  return catalogs[language][key].replace(/\{(\w+)\}/g, (whole, name: string) =>
-    name in values ? String(values[name]) : whole,
-  );
+  return format(catalogs[language][key], values);
 }

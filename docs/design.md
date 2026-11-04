@@ -53,15 +53,18 @@ Planned building blocks (each confirmed or replaced when its milestone starts): 
 | Vitest | 5.1.0 | root `devDependencies`, exact version |
 | `@playwright/test` | 1.64.1 | root `devDependencies`, exact version |
 | zod | 4.6.7 | `packages/core` `dependencies`, exact version (MIT) |
+| React, react-dom | 19.3.1 | `packages/web` `dependencies`, exact versions (MIT) |
+| Vite, `@vitejs/plugin-react` | 8.3.5, 6.2.1 | `packages/web` `devDependencies`, exact versions (MIT) |
+| jsdom | 30.1.3 | `packages/web` `devDependencies`, exact version (MIT) |
 
 - Versions are exact (`savePrefix: ''`), the lockfile is committed and CI installs with `--frozen-lockfile`.
 - pnpm settings live in `pnpm-workspace.yaml`. There is no `.npmrc`: since pnpm 11 it is read only for registry and authentication settings.
-- Shared development tools (TypeScript, type packages, the linter and the test runner) are root `devDependencies`. Packages declare only their runtime dependencies, plus `@tastelib/testkit` as a `devDependency` when they have tests.
+- Shared development tools (TypeScript, type packages, the linter and the test runner) are root `devDependencies`. Packages declare their runtime dependencies, plus `@tastelib/testkit` as a `devDependency` when their tests use it. Tools specific to one package (for `web`: Vite, its React plugin, `jsdom` and the React type packages) are that package's `devDependencies`.
 - No dependency runs install scripts today. A dependency that needs one must be listed in `allowBuilds` in `pnpm-workspace.yaml` (pnpm refuses unlisted ones), with the reason recorded in the same change.
 
 ### Packages and dependency graph
 
-Every package is `@tastelib/<folder>`, `private`, version `0.0.0`, `"type": "module"`, with one `exports` entry (`types` → `./dist/index.d.ts`, `default` → `./dist/index.js`); `e2e` has none, because nothing imports it. The names are internal and can change with the final name (§16).
+Every package is `@tastelib/<folder>`, `private`, version `0.0.0`, `"type": "module"`, with one `exports` entry (`types` → `./dist/index.d.ts`, `default` → `./dist/index.js`); `e2e` and `web` have none, because nothing imports them. The names are internal and can change with the final name (§16).
 
 | Package | Depends on |
 | --- | --- |
@@ -231,7 +234,7 @@ Library and media paths are built only from identifiers that match the format's 
 
 ### Test layout
 
-- **Unit tests** use Vitest (5.1.0). They sit next to the code as `src/<name>.test.ts`, are excluded from each package's build (`tsconfig.json` excludes them) and are type-checked by a `tsconfig.test.json` in the package (see `packages/testkit`). Every package except `e2e` has a `test` script (`vitest run`, with `--passWithNoTests` while a package has no tests yet); the root `pnpm test` runs them all and is part of `pnpm check` (§3). A package that gets its first test also gets `tsconfig.test.json`, its reference in the root `tsconfig.json`, and a `devDependencies` entry for `@tastelib/testkit`.
+- **Unit tests** use Vitest (5.1.0). They sit next to the code as `src/<name>.test.ts`, are excluded from each package's build (`tsconfig.json` excludes them) and are type-checked by a `tsconfig.test.json` in the package (see `packages/testkit`). Every package except `e2e` has a `test` script (`vitest run`, with `--passWithNoTests` while a package has no tests yet); the root `pnpm test` runs them all and is part of `pnpm check` (§3). A package that gets its first test also gets `tsconfig.test.json`, its reference in the root `tsconfig.json`, and a `devDependencies` entry for `@tastelib/testkit` when its tests use it.
 - **End-to-end tests** use Playwright (`@playwright/test` 1.64.1) in `packages/e2e`, as `tests/*.e2e.ts`. They are not part of `pnpm check`, because they need a browser download (about 120 MiB). First time: `pnpm test:e2e:install`; then `pnpm test:e2e`, which builds `testkit` first because the tests import its `dist/`. Each test starts its own local HTTP server on an OS-assigned port and serves generated content; nothing touches the network. The package has no `test` script on purpose, so `pnpm test` skips it.
 - **Shared helpers** live in `packages/testkit` (`@tastelib/testkit`, private, dev-only). It has no workspace dependencies and nothing ever lists it under `dependencies`. `core` stays free of other workspace packages at runtime; once `core` has tests it lists `testkit` as a `devDependency` only (a test-time edge, not part of the dependency graph in §3). It offers:
   - `makePng(width, height, seed)` and `makeBmp(width, height, seed)`: valid images built byte by byte (no image library), deterministic per seed (same pixels; PNG bytes are stable only within one Node version, because zlib output can change, so tests that need exact bytes use `makeBmp`). JPEG and WebP fixtures arrive with the encoder chosen for compression (M2).
@@ -316,3 +319,4 @@ The check command is in §3.
 | 2026-11-04 | `tastelib validate` reports three severities (error, warning, info) with stable codes, a library-relative `/` path, a JSON Pointer and a plain message; exit 0, 1 or 2; `--strict` fails on warnings; `--json` is the contract. Links within one file are errors; links to other files that point to nothing are warnings, and new ones are refused at write time. | Errors only (awaiting sync and stale proposals are not failures); numeric codes (unreadable); absolute paths in reports (expose a machine's folders when shared); cross-file dangling links as errors (one Git merge could block every write to the file until it is fixed by hand). |
 | 2026-11-04 | The per-machine config is a versioned JSON file (`version: 1`) validated with zod (a strict object: unknown fields are refused), and a media folder inside a Git working tree is refused at write time. | A loose schema that ignores unknown fields (a typo in a field name would silently do nothing); checking the media folder only in `tastelib doctor` (the bad setting would already be saved). |
 | 2026-11-04 | The interface translation layer is original code (typed message catalogs, a React context, about 80 lines). React 19 and Vite 8 with `@vitejs/plugin-react` build the app; `jsdom` runs component tests in Vitest. | `i18next` / `react-i18next`, `react-intl` or `lingui`: a dependency, ICU or plural machinery and runtime message loading for two languages and short strings; revisit if plurals or dates in messages become real needs. Tests with a real browser only: slower, and kept for the end-to-end suite. |
+| 2026-11-04 | Development-only dependencies under other permissive licenses are accepted: BlueOak-1.0.0, CC0-1.0 and MIT-0 (first case: `jsdom`'s tree). Only the maintainer widens the list in CLAUDE.md rule 7; this row records the case for review. | Choosing a DOM test environment with a tree limited to MIT, ISC, BSD and Apache-2.0: none found that renders React. Real-browser tests only: slower, and kept for the end-to-end suite. |

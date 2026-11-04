@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { catalogs, LANGUAGES, pickLanguage, translate } from "./core";
+import { catalogs, format, LANGUAGES, pickLanguage, translate } from "./core";
 
 const placeholders = (text: string) => [...text.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort();
 
@@ -44,7 +44,16 @@ describe("translate", () => {
     expect(translate("pt-BR", "language.label")).toBe("Idioma");
     expect(translate("en", "language.label")).toBe("Language");
   });
-  it("fills placeholders and leaves unknown ones", () => {
-    expect(translate("en", "language.label", { x: 1 })).toBe("Language");
+});
+
+describe("format", () => {
+  it("fills placeholders", () => {
+    expect(format("Hi {name}, {n} new", { name: "Ana", n: 2 })).toBe("Hi Ana, 2 new");
+  });
+  it("leaves a placeholder with no value", () => {
+    expect(format("Hi {name}", {})).toBe("Hi {name}");
+  });
+  it("ignores inherited object properties", () => {
+    expect(format("{constructor} {toString}", {})).toBe("{constructor} {toString}");
   });
 });

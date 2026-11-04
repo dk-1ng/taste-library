@@ -1,5 +1,5 @@
 import { act } from "react";
-import { createRoot } from "react-dom/client";
+import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { App } from "./App";
 import { catalogs } from "./i18n/core";
@@ -10,15 +10,18 @@ beforeAll(() => {
 });
 
 let host: HTMLElement | undefined;
-afterEach(() => {
+let root: Root | undefined;
+afterEach(async () => {
+  await act(async () => root?.unmount());
   host?.remove();
   host = undefined;
+  root = undefined;
 });
 
 async function mount(initialLanguage: "en" | "pt-BR") {
   host = document.createElement("div");
   document.body.append(host);
-  const root = createRoot(host);
+  root = createRoot(host);
   await act(async () => {
     root.render(
       <I18nProvider initialLanguage={initialLanguage}>
