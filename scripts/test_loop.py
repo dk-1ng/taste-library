@@ -36,9 +36,24 @@ class PickNextTest(unittest.TestCase):
         issues = [issue(8, "M2 Capture", "type: checkpoint", "status: blocked"), issue(9, "M3 Agent kit")]
         self.assertEqual(pick_next(issues), ("checkpoint", [issues[0]]))
 
-    def test_does_not_skip_past_an_earlier_checkpoint(self):
+    def test_open_work_comes_before_a_later_checkpoint(self):
         issues = [issue(5, "M2 Capture"), issue(8, "M2 Capture", "type: checkpoint", "status: blocked")]
         self.assertEqual(pick_next(issues)[1][0]["number"], 5)
+
+    def test_checkpoint_with_lower_number_comes_after_open_work(self):
+        issues = [issue(2, "M0 Foundation", "type: checkpoint", "status: blocked"), issue(7, "M0 Foundation")]
+        self.assertEqual(pick_next(issues), ("start", [issues[1]]))
+
+    def test_checkpoint_plus_blocked_issues_only_stops_at_checkpoint(self):
+        issues = [
+            issue(2, "M0 Foundation", "status: blocked"),
+            issue(3, "M0 Foundation", "type: checkpoint", "status: blocked"),
+        ]
+        self.assertEqual(pick_next(issues), ("checkpoint", [issues[1]]))
+
+    def test_checkpoint_alone_stops(self):
+        issues = [issue(3, "M0 Foundation", "type: checkpoint", "status: blocked")]
+        self.assertEqual(pick_next(issues), ("checkpoint", [issues[0]]))
 
     def test_all_blocked_stops(self):
         issues = [issue(4, "M0 Foundation", "status: blocked"), issue(5, "M1 Core")]

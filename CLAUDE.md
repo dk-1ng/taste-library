@@ -30,7 +30,7 @@ Everything in this repository is in English: code, comments, docs, issues, commi
 - Project board: number `8`, owner `dk-1ng`, id `PVT_kwHOE9rcGM4BqNdY`.
 - Status field: `PVTSSF_lAHOE9rcGM4BqNdYzholk28`. Options: Todo `f75ad846` · In Progress `47fc9ee4` · Done `98236657`.
 - Next issue = the lowest-numbered open issue in the earliest open milestone, skipping `status: blocked`.
-- `type: checkpoint` issues are pauses for a real-use test by the maintainer. They stay `status: blocked` until the maintainer closes them. Never work on one, and never skip past one: when the next issue is a checkpoint, stop and tell the maintainer.
+- `type: checkpoint` issues are pauses for a real-use test by the maintainer. They stay `status: blocked` until the maintainer closes them. Never work on one, and never skip past one. A checkpoint comes last within its milestone, whatever its number: it is picked only when no other non-blocked issue is left there; then stop and tell the maintainer.
 
 ## Model routing and effort
 
