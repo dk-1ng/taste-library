@@ -36,7 +36,7 @@ class PickNextTest(unittest.TestCase):
         issues = [issue(8, "M2 Capture", "type: checkpoint", "status: blocked"), issue(9, "M3 Agent kit")]
         self.assertEqual(pick_next(issues), ("checkpoint", [issues[0]]))
 
-    def test_does_not_skip_past_an_earlier_checkpoint(self):
+    def test_open_work_comes_before_a_later_checkpoint(self):
         issues = [issue(5, "M2 Capture"), issue(8, "M2 Capture", "type: checkpoint", "status: blocked")]
         self.assertEqual(pick_next(issues)[1][0]["number"], 5)
 
