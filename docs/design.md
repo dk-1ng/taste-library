@@ -71,21 +71,21 @@ Every package is `@tastelib/<folder>`, `private`, version `0.0.0`, `"type": "mod
 | `cli` | `core`, `server` (`tastelib open` starts the server) |
 | `testkit` | nothing |
 | `e2e` | `testkit` (`devDependency`) |
-| `web` | nothing yet (it runs in the browser, so it can use `core` only through a browser-safe entry point, decided when first needed) |
+| `web` | nothing yet; `react` and `react-dom` at run time (it runs in the browser, so it can use `core` only through a browser-safe entry point, decided when first needed) |
 
 Each edge is both a `workspace:*` dependency and a TypeScript project reference. The graph has no cycles. `agent-kit/` is not a workspace package (it holds no TypeScript) and arrives in M3.
 
 ### Compiler configuration
 
 - `tsconfig.base.json` holds the shared options: `target` and `lib` `es2025`, `module` `nodenext`, `types: []`, `strict`, `noUncheckedIndexedAccess`, `noImplicitOverride`, `verbatimModuleSyntax`, `isolatedModules`, `erasableSyntaxOnly`, `forceConsistentCasingInFileNames`, `skipLibCheck`, `composite`, `declaration`, `declarationMap`, `sourceMap`. Paths use `${configDir}`, so every package compiles `src/` to `dist/` (`e2e` is the exception: it compiles `tests/` and its Playwright config, declarations only) and keeps its `.tsbuildinfo` inside `dist/` (deleting `dist/` forces a rebuild).
-- Each package's `tsconfig.json` extends the base and adds only `types` and `references`, plus an `exclude` for `*.test.ts` when it has unit tests (type-checked by its `tsconfig.test.json`, §15). Node packages set `types: ["node"]` and write relative imports with the `.js` extension. `web` sets `module` `esnext`, `moduleResolution` `bundler`, `lib` `["es2025", "dom"]`.
+- Each package's `tsconfig.json` extends the base and adds only `types` and `references`, plus an `exclude` for `*.test.ts` when it has unit tests (type-checked by its `tsconfig.test.json`, §15). Node packages set `types: ["node"]` and write relative imports with the `.js` extension. `web` sets `module` `esnext`, `moduleResolution` `bundler`, `jsx` `react-jsx`, `lib` `["es2025", "dom"]`, emits declarations only (Vite produces the bundle) and writes relative imports without an extension.
 - The root `tsconfig.json` is a solution file (`files: []`, references to every package and to the test configs) for editors and `tsc -b` from the root.
 - The configuration avoids every option that TypeScript 6.0 deprecates, so moving to TypeScript 7 is a version bump (checked: 7.0.2 builds it unchanged).
 
 ### Build
 
 - Each package's `build` script is `tsc -b`. `pnpm -r build` runs them in dependency order; `pnpm build` at the root does the same, and `pnpm clean` runs `tsc -b --clean`.
-- `web` emits with `tsc` only until its app shell lands later in M0 with React and Vite; its build then becomes `tsc -b && vite build`.
+- `web`'s build is `tsc -b && vite build`: `tsc` type-checks and emits declarations, Vite writes the app to `packages/web/dist/app`. `pnpm --filter @tastelib/web dev` starts the Vite dev server.
 - Scripts in any `package.json` call only cross-platform programs (`tsc`, `pnpm`, `vitest`, `playwright`, later `vite`). No shell built-ins (`rm`, `cp`, `mkdir -p`), no inline environment variables (`FOO=1 cmd`), no quoting or globbing that only a POSIX shell understands. A step that needs more is a Node script.
 
 ### Check command, lint and format
@@ -200,6 +200,8 @@ Where packs are exported is a per-machine setting (§4), not part of the library
 
 The interface is in English with a Brazilian Portuguese option from the first release. All user-facing strings go through the translation layer from day one. The README has a pt-BR translation in `docs/pt-BR/`.
 
+**Translation layer (`packages/web/src/i18n`).** A small in-house layer, no dependency: one message file per language (`messages.en.ts` is the reference and defines the `MessageKey` type; `messages.pt-BR.ts` is typed `Record<MessageKey, string>`), `translate(language, key, values)` with `{name}` placeholders, and an `I18nProvider` / `useI18n()` pair for React. Components never contain literal user-facing text; they call `t("key")`. The first language is taken from the browser preferences (any `pt` tag gives `pt-BR`, otherwise `en`) and a selector switches it at once. A missing key fails `pnpm check` twice: `tsc` refuses a catalog without every key, and a unit test checks that both catalogs have the same keys, no empty message and the same placeholders. Storing the choice in the per-machine config (§4) arrives with the server.
+
 The interface language is a per-machine setting (§4). The library's `language` (in `library.json`) is something else: the language in which agents write proposals, so the vocabulary stays in one language whichever computer the library is opened on. Validation codes are stable identifiers in English. Messages in `tastelib validate --json` and in MCP results are always in English, so agents and scripts see the same text everywhere; the human-readable output may be translated into the interface language.
 
 ## 13. Portability
@@ -313,3 +315,4 @@ The check command is in §3.
 | 2026-11-04 | `--json` validation messages (and MCP results) are always in English; only the human-readable output may be translated. A library-wide issue has `file: null`. | Translated messages everywhere: agents and scripts would see different text per computer. A made-up file name for library-wide issues: a path that does not exist. |
 | 2026-11-04 | `tastelib validate` reports three severities (error, warning, info) with stable codes, a library-relative `/` path, a JSON Pointer and a plain message; exit 0, 1 or 2; `--strict` fails on warnings; `--json` is the contract. Links within one file are errors; links to other files that point to nothing are warnings, and new ones are refused at write time. | Errors only (awaiting sync and stale proposals are not failures); numeric codes (unreadable); absolute paths in reports (expose a machine's folders when shared); cross-file dangling links as errors (one Git merge could block every write to the file until it is fixed by hand). |
 | 2026-11-04 | The per-machine config is a versioned JSON file (`version: 1`) validated with zod (a strict object: unknown fields are refused), and a media folder inside a Git working tree is refused at write time. | A loose schema that ignores unknown fields (a typo in a field name would silently do nothing); checking the media folder only in `tastelib doctor` (the bad setting would already be saved). |
+| 2026-11-04 | The interface translation layer is original code (typed message catalogs, a React context, about 80 lines). React 19 and Vite 8 with `@vitejs/plugin-react` build the app; `jsdom` runs component tests in Vitest. | `i18next` / `react-i18next`, `react-intl` or `lingui`: a dependency, ICU or plural machinery and runtime message loading for two languages and short strings; revisit if plurals or dates in messages become real needs. Tests with a real browser only: slower, and kept for the end-to-end suite. |

@@ -23,6 +23,9 @@
       "path": "packages/web"
     },
     {
+      "path": "packages/web/tsconfig.test.json"
+    },
+    {
       "path": "packages/cli"
     },
     {

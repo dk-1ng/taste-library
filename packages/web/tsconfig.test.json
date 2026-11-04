@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "lib": ["es2025", "dom"],
+    "jsx": "react-jsx",
+    "types": ["node"],
+    "emitDeclarationOnly": true,
+    "rootDir": "${configDir}",
+    "outDir": "${configDir}/dist-test",
+    "tsBuildInfoFile": "${configDir}/dist-test/tsconfig.tsbuildinfo"
+  },
+  "include": ["${configDir}/src/**/*.test.ts", "${configDir}/src/**/*.test.tsx"],
+  "references": [{ "path": "./tsconfig.json" }]
+}
