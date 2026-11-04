@@ -92,8 +92,8 @@ jobs:
           "$py" --version
           "$py" -m unittest discover -s scripts -p 'test_*.py' -v
 
-  build:
-    name: Build (${{ matrix.os }})
+  check:
+    name: Check (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
@@ -109,10 +109,16 @@ jobs:
           node-version-file: .nvmrc
           package-manager-cache: false
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          cache: true
       - name: Install
         run: pnpm install --frozen-lockfile
-      - name: Build every package
-        run: pnpm -r build
+      - name: Check (lint, format, typecheck, test, build)
+        run: pnpm check
+      - name: Install the Playwright browser
+        run: pnpm test:e2e:install
+      - name: End-to-end tests
+        run: pnpm test:e2e
 
   zizmor:
     name: Workflow audit (zizmor)

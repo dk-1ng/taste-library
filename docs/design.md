@@ -94,6 +94,7 @@ Each edge is both a `workspace:*` dependency and a TypeScript project reference.
 - Biome is limited to code and data files (`.ts`, `.tsx`, `.js`, `.mjs`, `.json`), listed in `biome.json`. Markdown and YAML are not touched: it would reflow tables and prose in the design documents. It honors `.gitignore`.
 - `pnpm typecheck` is `tsc -b`. `pnpm test` runs each package's `test` script when it has one (`pnpm -r --if-present test`); the test layout is in §15.
 - `pnpm install` runs `prepare`, which runs `scripts/setup-hooks.mjs`: it sets `core.hooksPath` to `.githooks` in a Git checkout and does nothing elsewhere. New clones get the hooks without a manual step.
+- CI runs `pnpm check`, then the end-to-end tests (`pnpm test:e2e:install`, `pnpm test:e2e`), on `ubuntu-latest` and `windows-latest` with the Node version from `.nvmrc` and the pnpm version from `packageManager`. The pnpm store is cached through `pnpm/action-setup` (`cache: true`); actions are pinned to full commit SHAs and `zizmor` audits the workflows.
 - Dependabot watches the npm ecosystem weekly with a 7-day cooldown, groups development dependencies into one PR and uses the `chore(deps)` prefix.
 
 
