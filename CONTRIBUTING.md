@@ -30,7 +30,7 @@ Everything goes through an issue. One issue = one branch = one pull request.
 3. Commit in small, logical steps (see Commits).
 4. To bring in new commits from `main`, merge `main` into your branch. Do not rebase a pushed branch: force pushes are refused.
 5. Open a pull request with the template filled in and `Closes #N`. CI must be green.
-6. The maintainer approves; the PR is squash-merged and the branch is deleted.
+6. The maintainer approves; the PR is squash-merged and GitHub deletes the branch automatically.
 
 ## Commits
 
@@ -60,7 +60,7 @@ Scopes:
 | `docs` | general documentation |
 | `repo` | workflow files: `CLAUDE.md`, templates, agents, hooks |
 
-**Attribution trailer.** Every commit made with an AI tool ends with a blank line and `Assisted-by: <tool>` (in this project, `Assisted-by: Claude Code`). CI checks it on every pull request; Dependabot commits are exempt. Do not use `Co-Authored-By` for an AI, and do not add "Generated with ..." lines.
+**Attribution trailer.** Every commit except merge commits ends with a blank line and an `Assisted-by:` trailer naming the AI tool used (in this project, `Assisted-by: Claude Code`), or `Assisted-by: none` if no AI tool was used. CI checks it on every pull request; Dependabot pull requests are exempt. Do not use `Co-Authored-By` for an AI, and do not add "Generated with ..." lines (CI refuses them in every commit).
 
 ## Pull requests
 

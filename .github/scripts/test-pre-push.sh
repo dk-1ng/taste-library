@@ -5,7 +5,7 @@ set -eu
 hook="$(cd "$(dirname "$0")/../.." && pwd)/.githooks/pre-push"
 zero=0000000000000000000000000000000000000000
 work="$(mktemp -d)"
-trap 'rm -rf "$work"' EXIT
+trap 'cd /; rm -rf "$work" || true' EXIT
 cd "$work"
 
 git init -q -b main .

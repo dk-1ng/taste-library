@@ -1,6 +1,6 @@
-<!-- Tradução produzida com IA a partir de README.md. -->
-
 # taste-library
+
+> Tradução produzida com IA a partir do [README em inglês](../../README.md).
 
 Uma biblioteca de gosto em design, local, para quem desenvolve com agentes de IA.
 
