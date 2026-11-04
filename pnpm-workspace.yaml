@@ -1,0 +1,8 @@
+packages:
+  - packages/*
+
+# Refuse to install on a Node version outside the root `engines.node` range.
+engineStrict: true
+
+# Record exact versions, never ranges (docs/design.md section 3).
+savePrefix: ''

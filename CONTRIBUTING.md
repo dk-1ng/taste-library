@@ -76,7 +76,26 @@ Enable the repository's Git hooks once per clone:
 git config core.hooksPath .githooks
 ```
 
-The `pre-push` hook refuses pushes to `main` and force pushes. The toolchain (Node, pnpm, the check command) is set up in milestone M0 and documented here when it lands.
+The `pre-push` hook refuses pushes to `main` and force pushes.
+
+### Toolchain
+
+The pinned versions and the reasons behind them are in `docs/design.md` §3.
+
+1. **Node.js 26 LTS, 26.13.0 or later.** `.nvmrc` names the line (`26`), so a version manager that reads it (nvm, fnm, Volta, mise and others) picks it up. `pnpm install` refuses an older Node.
+2. **pnpm**, installed any way you like (the standalone installer, your system package manager, or `npm install --global pnpm`). pnpm reads `packageManager` in the root `package.json`, downloads the pinned version (12.16.1) and runs that one. Corepack is not needed.
+
+Then, from the repository root:
+
+```sh
+pnpm install     # installs the exact versions in pnpm-lock.yaml
+pnpm -r build    # builds every package in dependency order (same as: pnpm build)
+pnpm clean       # removes the build output of every package
+```
+
+The code lives in `packages/` (`core`, `server`, `web`, `cli`, `mcp`), one workspace package each. Each package compiles `src/` to `dist/` with `tsc -b`; the shared compiler options are in `tsconfig.base.json`.
+
+When you add a dependency, pnpm records the exact version (no `^` ranges) and the lockfile is committed. Shared development tools go in the root `package.json`; a package declares only what it needs at run time. Scripts in any `package.json` must run unchanged on Linux and Windows: no shell built-ins such as `rm` or `cp`, and no inline environment variables. The check command arrives later in M0.
 
 Maintainer workflow helpers live in `scripts/` (Python 3.9+, standard library only, plus the GitHub CLI): `python3 scripts/loop.py status` shows what the per-issue loop should do next. Their tests run with `python3 -m unittest discover -s scripts`.
 

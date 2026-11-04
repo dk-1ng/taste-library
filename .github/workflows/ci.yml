@@ -92,6 +92,28 @@ jobs:
           "$py" --version
           "$py" -m unittest discover -s scripts -p 'test_*.py' -v
 
+  build:
+    name: Build (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Node from .nvmrc; pnpm from the root packageManager field (docs/design.md section 3).
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Build every package
+        run: pnpm -r build
+
   zizmor:
     name: Workflow audit (zizmor)
     runs-on: ubuntu-latest
