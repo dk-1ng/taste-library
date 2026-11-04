@@ -1,4 +1,4 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { createSeededRandom, makeBmp, makeHtmlPage, makePng, withTempDir } from "./index.js";
@@ -62,5 +62,25 @@ describe("temporary directory", () => {
       expect((await readFile(file)).equals(png)).toBe(true);
     });
     await expect(readFile(join(seen, "ímagem.png"))).rejects.toThrow();
+  });
+
+  it("finds a folder by either Unicode normalization form where the file system folds them", async () => {
+    await withTempDir(async (dir) => {
+      const nfc = "Usu\u00e1rio"; // precomposed (what the user types)
+      const nfd = nfc.normalize("NFD"); // decomposed (what macOS may return)
+      expect(nfd).not.toBe(nfc);
+      await mkdir(join(dir, nfc));
+      await writeFile(join(dir, nfc, "nota.txt"), "x");
+      // The listing may return either form; both must name the same folder once normalized.
+      const listed = (await readdir(dir)).find((name) => name.normalize("NFC") === nfc);
+      expect(listed).toBeDefined();
+      // Opening by the listed name always works.
+      expect(await readFile(join(dir, listed as string, "nota.txt"), "utf8")).toBe("x");
+      // Opening by the other form works only where the file system folds normalization (macOS);
+      // elsewhere the two names are different files. Neither outcome may corrupt the data.
+      const other = listed === nfc ? nfd : nfc;
+      const viaOther = await readFile(join(dir, other, "nota.txt"), "utf8").catch(() => null);
+      expect([null, "x"]).toContain(viaOther);
+    });
   });
 });

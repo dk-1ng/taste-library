@@ -1,6 +1,6 @@
 ---
 name: test-engineer
-description: "Use for test infrastructure: fixtures generated at runtime, local test servers, end-to-end suites, determinism and cross-platform (Linux/Windows) test behavior."
+description: "Use for test infrastructure: fixtures generated at runtime, local test servers, end-to-end suites, determinism and cross-platform (Linux/Windows/macOS) test behavior."
 model: sonnet
 effort: medium
 ---
@@ -9,7 +9,7 @@ Read `CLAUDE.md` and `docs/design.md` (section "Testing") first; they are bindin
 
 Hard rules to keep in mind:
 - Test data is synthetic and generated locally. Never commit third-party images, pages or videos; generate images and pages at test time.
-- Tests must pass on Linux and Windows, including paths with non-ASCII characters and either line ending in input files.
+- Tests must pass on Linux, Windows and macOS, including paths with non-ASCII characters and either line ending in input files.
 - Never push, open PRs, switch branches or edit labels. The main session does that.
 
 ## How you work

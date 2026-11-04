@@ -39,7 +39,7 @@ docs/
 examples/sample-library/   only the maintainer's own or freely licensed media
 ```
 
-Planned building blocks (each confirmed or replaced when its milestone starts): React + Vite for the interface; Hono for the local server; zod for validation; Playwright for page capture; sharp (WebP) and `ffmpeg-static` for media; Vitest and Playwright for tests; GitHub Actions on Linux and Windows; a pinned Node LTS.
+Planned building blocks (each confirmed or replaced when its milestone starts): React + Vite for the interface; Hono for the local server; zod for validation; Playwright for page capture; sharp (WebP) and `ffmpeg-static` for media; Vitest and Playwright for tests; GitHub Actions on Linux, Windows and macOS; a pinned Node LTS.
 
 ### Toolchain (pinned in M0)
 
@@ -209,12 +209,12 @@ The interface language is a per-machine setting (§4). The library's `language` 
 
 ## 13. Portability
 
-- Linux and Windows are both first-class (macOS is expected to work).
+- Linux, Windows and macOS (Apple Silicon) are all first-class and verified in CI.
 - No script that runs on only one operating system. Git hooks are POSIX `sh`, which Git runs on every platform. Workflow helper scripts are plain Node (`.mjs`, no build step, no dependencies), which runs on every platform.
 - Text files use LF (`.gitattributes`); the tool reads either line ending.
 - Library files are UTF-8 without a BOM, LF, in a canonical JSON form (format-spec §3), so the same data gives the same bytes on every system.
 - File names inside a library and a media folder come only from identifiers (ASCII, lowercase, never a Windows reserved name), so they behave the same on case-insensitive file systems and never depend on Unicode normalization. Only the folders the user chooses may have non-ASCII names.
-- Paths with non-ASCII characters (for example `Usuário`) are tested in CI.
+- Paths with non-ASCII characters (for example `Usuário`) are tested in CI. macOS file systems may return such a name in a different Unicode normalization (NFD) than the one passed in, so code compares and stores paths as given and never assumes a listed name equals the typed one byte for byte.
 
 ## 14. Security
 
@@ -229,7 +229,7 @@ Library and media paths are built only from identifiers that match the format's 
 - Unit tests next to the behavior; pure logic (schemas, parsers, naming, the intent filter, migrations) always has them.
 - End-to-end tests drive the app in a browser.
 - Test data is **synthetic and generated at test time**. No third-party images, pages or videos are ever committed.
-- CI runs every check on Linux and Windows, including a non-ASCII path and both line endings in inputs.
+- CI runs every check on Linux, Windows and macOS, including a non-ASCII path and both line endings in inputs.
 - Required checks: `tastelib validate` passes on the sample library; migrations are tested; a made-up briefing full of visual decisions must leak none of them into the intent, and the discarded list must show them all.
 
 ### Test layout
@@ -250,7 +250,7 @@ Library and media paths are built only from identifiers that match the format's 
 - **Schemas** have positive and negative tests for every rule in format-spec, including the canonical serializer (same data, same bytes; `not-canonical` on BOM, CRLF and wrong order) and non-ASCII text in notes.
 - **Each migration step N → N+1** is tested for: the golden vN library migrates to a library that validates against the vN+1 schemas; the specific changes the step makes; determinism (two runs give identical bytes); files already at vN+1 pass through unchanged; an interrupted run (stopped after some writes, with the manifest still `in-progress`) is restored from the backup and reaches the same result as an uninterrupted one; the same for an interrupted migration of a library with mixed file versions, where `library.json` is already current; a crash while copying the backup (owner gone, no manifest yet) leaves the originals untouched, and the backup is deleted without restoring; two concurrent recoverers of an `in-progress` backup with a dead owner: only one wins the `owner.json` rename and restores, and the other re-checks and does not restore; a slow recoverer that renames the new `owner.json` of one that already took over finds different bytes, puts the claim back, and does not act; a migration still copying (owner alive, no manifest yet) is not deleted by a second writer, which gets `write-conflict`; a backup folder with no `owner.json` yet, or with an owner on another host, is treated as live; an unreadable manifest is not deleted (the write gets `write-conflict` and the backup is kept); `owner.json` is removed last when a backup is deleted; a backup marked `done` whose owner is gone is deleted without touching the files; and with two concurrent migrations only one claims the backup folder, while the other gets `write-conflict` and does not restore the backup of a live owner.
 - **The chain:** the golden v1 library migrates through every step to the current version and validates. A test fails if `CURRENT_FORMAT_VERSION` has no step module, schema folder and golden library for every version up to it.
-- **Validate** has one test per issue code (format-spec §16.2), checking severity, file, pointer and exit code, on Linux and Windows and under a non-ASCII path.
+- **Validate** has one test per issue code (format-spec §16.2), checking severity, file, pointer and exit code, on Linux, Windows and macOS and under a non-ASCII path.
 - **Writes** have tests for every allowed agent write and for refusals with `not-allowed` (one per refused kind in format-spec §13.1), for `write-conflict` (the file changes between read and rename), for a multi-file write that stops partway (the primary change is kept, only `dangling-link` warnings remain, and the report lists the files written and not written), for slug derivation (a long name, a name that shortens to a reserved word, a taken slug near 64 characters), for clock skew (a lower bound in the future), and for sequential ids that are never reused after a deletion.
 
 The check command is in §3.
@@ -265,7 +265,7 @@ The check command is in §3.
 
 | Milestone | Delivers |
 | --- | --- |
-| M0 Foundation | monorepo, code standards, tests, CI on Linux and Windows, translations, `format-spec.md` v1, per-machine config, portability rules |
+| M0 Foundation | monorepo, code standards, tests, CI on Linux, Windows and macOS, translations, `format-spec.md` v1, per-machine config, portability rules |
 | M1 Core & format | schemas, validated read/write, index, migrations; `tastelib init / validate / doctor` |
 | M2 Capture & notes | paste image, URL and video; compression; inbox; notes; positive and negative pins; awaiting sync; ends with a real-use checkpoint |
 | M3 Agent kit I | writes through CLI and MCP; plugin with `/taste:process`; review queue |
@@ -320,3 +320,4 @@ The check command is in §3.
 | 2026-11-04 | The per-machine config is a versioned JSON file (`version: 1`) validated with zod (a strict object: unknown fields are refused), and a media folder inside a Git working tree is refused at write time. | A loose schema that ignores unknown fields (a typo in a field name would silently do nothing); checking the media folder only in `tastelib doctor` (the bad setting would already be saved). |
 | 2026-11-04 | The interface translation layer is original code (typed message catalogs, a React context, about 80 lines). React 19 and Vite 8 with `@vitejs/plugin-react` build the app; `jsdom` runs component tests in Vitest. | `i18next` / `react-i18next`, `react-intl` or `lingui`: a dependency, ICU or plural machinery and runtime message loading for two languages and short strings; revisit if plurals or dates in messages become real needs. Tests with a real browser only: slower, and kept for the end-to-end suite. |
 | 2026-11-04 | Development-only dependencies under other permissive licenses are accepted: BlueOak-1.0.0, CC0-1.0 and MIT-0 (first case: `jsdom`'s tree). Only the maintainer widens the list in CLAUDE.md rule 7; this row records the case for review. | Choosing a DOM test environment with a tree limited to MIT, ISC, BSD and Apache-2.0: none found that renders React. Real-browser tests only: slower, and kept for the end-to-end suite. |
+| 2026-11-04 | macOS (Apple Silicon, `macos-latest`) joins Linux and Windows in the CI matrix for the tooling and check jobs. | Leaving macOS as "expected to work": native dependencies (`sharp`, `ffmpeg-static`, Playwright browsers) arrive in later milestones and would fail there unnoticed. |

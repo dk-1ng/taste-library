@@ -19,7 +19,7 @@ These are non-negotiable. `CLAUDE.md` holds the full wording.
 5. Local and private: no telemetry, no remote code, no account, works offline.
 6. Agents write library data only through `tastelib`.
 7. Original code, or dependencies under permissive licenses.
-8. Portable: Linux and Windows, including non-ASCII paths.
+8. Portable: Linux, Windows and macOS, including non-ASCII paths.
 
 ## Workflow
 
