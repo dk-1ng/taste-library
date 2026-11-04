@@ -75,7 +75,7 @@ When the maintainer says "continue":
 5. **Verify** with the project check command (defined in M0; until then, the CI policy checks) and every acceptance criterion.
 6. **`reviewer`** reviews the branch. On `CHANGES REQUESTED`, fix and review again.
 7. If `README.md` changed, **`translator`** updates `docs/pt-BR/README.md`.
-8. **Open the PR** (`Closes #N`, template filled, title = the Conventional Commit the squash will produce). Wait for CI with `gh pr checks <PR> --watch`; merge only when it is green. Ask the maintainer to approve the merge, then run `gh pr merge <PR> --squash --subject "<PR title> (#<PR>)" --body "<why, if useful>"` with a body that ends with a blank line and `Assisted-by: Claude Code`. GitHub deletes the branch automatically. Then `git switch main && git pull --ff-only`.
+8. **Open the PR** (`Closes #N`, template filled, title = the Conventional Commit the squash will produce). Wait for CI with `gh pr checks <PR> --watch`; merge only when it is green. Ask the maintainer to approve the merge, then run `gh pr merge <PR> --squash --subject "<PR title> (#<issue>) (#<PR>)" --body "<why, if useful>"` with a body that ends with a blank line and `Assisted-by: Claude Code`. GitHub deletes the branch automatically. Then `git switch main && git pull --ff-only`.
 9. **Finish:** `python3 scripts/loop.py finish N`.
 10. Tell the maintainer, in Portuguese: the issue is finished, what was delivered, and that they should run `/clear` and type `continue`.
 11. If the session must stop mid-task, post the exact state with `python3 scripts/loop.py comment N "<done / missing / files touched / next steps>"` and push the branch, so the next session can resume.
