@@ -3,5 +3,5 @@ import { defineConfig } from "vite";
 
 export default defineConfig({
   plugins: [react()],
-  build: { outDir: "dist/app", emptyOutDir: true },
+  build: { modulePreload: { polyfill: false }, outDir: "dist/app", emptyOutDir: true },
 });

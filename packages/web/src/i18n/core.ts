@@ -21,8 +21,9 @@ export function isLanguage(value: unknown): value is Language {
 export function pickLanguage(preferred: readonly string[]): Language {
   for (const tag of preferred) {
     if (isLanguage(tag)) return tag;
-    if (tag.toLowerCase().startsWith("pt")) return "pt-BR";
-    if (tag.toLowerCase().startsWith("en")) return "en";
+    const lower = tag.toLowerCase();
+    if (lower === "pt" || lower.startsWith("pt-")) return "pt-BR";
+    if (lower === "en" || lower.startsWith("en-")) return "en";
   }
   return DEFAULT_LANGUAGE;
 }
