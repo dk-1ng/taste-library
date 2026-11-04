@@ -3,6 +3,13 @@
   "compilerOptions": {
     "module": "esnext",
     "moduleResolution": "bundler",
-    "lib": ["es2025", "dom"]
-  }
+    "lib": ["es2025", "dom"],
+    "jsx": "react-jsx",
+    "emitDeclarationOnly": true,
+    "rootDir": "${configDir}",
+    "outDir": "${configDir}/dist/types",
+    "tsBuildInfoFile": "${configDir}/dist/tsconfig.tsbuildinfo"
+  },
+  "include": ["${configDir}/src/**/*", "${configDir}/vite.config.ts"],
+  "exclude": ["${configDir}/src/**/*.test.ts", "${configDir}/src/**/*.test.tsx"]
 }
