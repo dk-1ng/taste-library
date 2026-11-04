@@ -1,0 +1,34 @@
+name: Task
+description: A planned unit of work (maintainers only).
+labels: ["status: ready"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Planned work only. To report a problem or suggest an idea, use the other templates.
+        Do not paste screenshots of third-party designs or any personal data.
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Why this is needed and how it fits the design (link the docs/design.md section).
+    validations:
+      required: true
+  - type: textarea
+    id: tasks
+    attributes:
+      label: Tasks
+      description: A checklist of the work.
+      value: |
+        - [ ]
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Observable results that prove the work is done, each one verifiable.
+      value: |
+        - [ ]
+    validations:
+      required: true
