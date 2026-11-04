@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { mkdir, readdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { join, sep } from "node:path";
 import { withTempDir } from "@tastelib/testkit";
@@ -153,6 +154,14 @@ describe("reading hardening", () => {
     });
   });
 
+  it.skipIf(process.platform === "win32")("refuses a named pipe instead of hanging", async () => {
+    await withTempDir(async (dir) => {
+      const pipe = join(dir, "config.json");
+      execFileSync("mkfifo", [pipe]);
+      await expect(readConfig(pipe)).rejects.toThrow(/not a regular file/);
+    });
+  });
+
   it("refuses something that is not a regular file", async () => {
     await withTempDir(async (dir) => {
       const folder = join(dir, "config.json");
@@ -250,6 +259,14 @@ describe("media folder outside Git", () => {
       await mkdir(join(repo, ".git"), { recursive: true });
       await mkdir(join(dir, "plain"));
       const sneaky = `${join(dir, "plain", "missing")}${sep}..${sep}..${sep}repo${sep}media`;
+      // Called directly (as `tastelib doctor` will), without the schema in front of it.
+      for (const bad of [sneaky, "relative"]) {
+        const error = await assertMediaOutsideGit(bad, join(dir, "config.json")).catch(
+          (e: unknown) => e,
+        );
+        expect(error).toBeInstanceOf(ConfigError);
+        expect((error as ConfigError).field).toBe("mediaPath");
+      }
       await expect(
         writeConfig(join(dir, "config.json"), { version: 1, mediaPath: sneaky }),
       ).rejects.toThrow(ConfigError);
