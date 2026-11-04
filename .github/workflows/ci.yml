@@ -62,6 +62,15 @@ jobs:
             exit 1
           fi
 
+      - name: No build artifacts (they embed local machine paths)
+        run: |
+          bad="$(git -c core.quotePath=false ls-files | grep -E '(^|/)__pycache__/|\.py[cod]$|\.tsbuildinfo$' || true)"
+          if [ -n "$bad" ]; then
+            echo "::error::Build artifacts must not be committed:"
+            echo "$bad"
+            exit 1
+          fi
+
   tooling:
     name: Workflow tooling (${{ matrix.os }})
     strategy:
