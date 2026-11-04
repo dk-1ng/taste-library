@@ -59,7 +59,7 @@ def pick_next(issues: list[dict]) -> tuple[str, list[dict]]:
     Returns (action, issues):
       ("resume", [issue])      an issue is already in progress
       ("start", [issue])       the next issue to start
-      ("checkpoint", [issue])  the next issue is a checkpoint: stop for the maintainer
+      ("checkpoint", [issue])  only a checkpoint is left in the milestone: stop for the maintainer
       ("blocked", [issues])    every open issue in the earliest milestone is blocked
       ("empty", [])            no open issue with a milestone
     """
@@ -77,12 +77,14 @@ def pick_next(issues: list[dict]) -> tuple[str, list[dict]]:
     current = sorted(
         (i for i in planned if milestone_rank(i) == earliest), key=lambda i: i["number"]
     )
+    # Checkpoints always come last within their milestone, whatever their number.
     for issue in current:
         names = labels_of(issue)
-        if CHECKPOINT in names:
-            return "checkpoint", [issue]
-        if BLOCKED not in names:
+        if CHECKPOINT not in names and BLOCKED not in names:
             return "start", [issue]
+    for issue in current:
+        if CHECKPOINT in labels_of(issue):
+            return "checkpoint", [issue]
     return "blocked", current
 
 
