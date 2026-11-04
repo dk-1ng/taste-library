@@ -2,7 +2,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { pickNext } from "./loop.mjs";
+import { main, pickNext } from "./loop.mjs";
 
 function issue(number, milestone = null, ...labels) {
   return {
@@ -81,4 +81,26 @@ test("all blocked stops", () => {
 
 test("ignores issues without a milestone", () => {
   assert.deepEqual(pickNext([issue(1)]), ["empty", []]);
+});
+
+test("argument errors exit with 2 before any network call", () => {
+  const originalError = console.error;
+  console.error = () => {};
+  try {
+    for (const argv of [[], ["bogus"], ["start", "abc"], ["status", "x"], ["comment", "5"]]) {
+      assert.equal(main(argv), 2, argv.join(" "));
+    }
+  } finally {
+    console.error = originalError;
+  }
+});
+
+test("--help exits with 0", () => {
+  const originalLog = console.log;
+  console.log = () => {};
+  try {
+    assert.equal(main(["--help"]), 0);
+  } finally {
+    console.log = originalLog;
+  }
 });

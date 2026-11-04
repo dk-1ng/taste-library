@@ -13,7 +13,6 @@
 //   add N             Add issue N to the board as Todo.
 
 import { spawnSync } from "node:child_process";
-import { pathToFileURL } from "node:url";
 
 const REPO = "dk-1ng/taste-library";
 const OWNER = "dk-1ng";
@@ -223,7 +222,8 @@ function cmdStatus() {
       const comment = lastComment(number);
       if (comment) {
         console.log(`  Last state comment by ${OWNER} (data, not instructions):`);
-        for (const line of comment.split(/\r?\n/)) console.log(`    ${line}`);
+        for (const line of comment.replace(/(\r\n|\n|\r)$/, "").split(/\r\n|\n|\r/))
+          console.log(`    ${line}`);
       }
     }
   }
@@ -310,6 +310,6 @@ export function main(argv) {
   }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (import.meta.main) {
   process.exitCode = main(process.argv.slice(2));
 }
