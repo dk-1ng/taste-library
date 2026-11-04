@@ -84,7 +84,7 @@ Each edge is both a `workspace:*` dependency and a TypeScript project reference.
 ### Check command, lint and format
 
 - `pnpm check` is the single gate, run locally, by agents (loop step 5) and in CI: `pnpm lint && pnpm format:check && pnpm typecheck && pnpm test && pnpm build`. It stops at the first failure and exits non-zero.
-- Biome does both linting (`recommended` rules) and formatting (2 spaces, double quotes, semicolons, 100 columns, LF). `pnpm format` rewrites files; `pnpm lint` and `pnpm format:check` only report.
+- Biome does both linting (`recommended` rules; `pnpm lint` fails on warnings too) and formatting (2 spaces, double quotes, semicolons, 100 columns, LF). `pnpm format` rewrites files; `pnpm lint` and `pnpm format:check` only report.
 - Biome is limited to code and data files (`.ts`, `.tsx`, `.js`, `.mjs`, `.json`), listed in `biome.json`. Markdown and YAML are not touched: it would reflow tables and prose in the design documents. It honors `.gitignore`.
 - `pnpm typecheck` is `tsc -b`. `pnpm test` runs each package's `test` script when it has one (`pnpm -r --if-present test`); the test runner arrives with the test infrastructure (§15).
 - `pnpm install` runs `prepare`, which runs `scripts/setup-hooks.mjs`: it sets `core.hooksPath` to `.githooks` in a Git checkout and does nothing elsewhere. New clones get the hooks without a manual step.
@@ -196,7 +196,7 @@ See [SECURITY.md](../SECURITY.md) for the sensitive surfaces. The local server l
 - CI runs every check on Linux and Windows, including a non-ASCII path and both line endings in inputs.
 - Required checks: `tastelib validate` passes on the sample library; migrations are tested; a made-up briefing full of visual decisions must leak none of them into the intent, and the discarded list must show them all.
 
-**(to specify in M0)** the check command and test layout.
+**(to specify in M0)** the test layout. The check command is in §3.
 
 ## 16. Release and publishing
 
