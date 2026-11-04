@@ -85,6 +85,10 @@ jobs:
       - name: pre-push hook behaves the same on every platform
         shell: bash
         run: sh .github/scripts/test-pre-push.sh
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
       - name: loop.mjs selection logic
         run: node --test scripts/
 
