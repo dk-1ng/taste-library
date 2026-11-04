@@ -21,9 +21,10 @@ afterEach(async () => {
 async function mount(initialLanguage: "en" | "pt-BR") {
   host = document.createElement("div");
   document.body.append(host);
-  root = createRoot(host);
+  const current = createRoot(host);
+  root = current;
   await act(async () => {
-    root.render(
+    current.render(
       <I18nProvider initialLanguage={initialLanguage}>
         <App />
       </I18nProvider>,
