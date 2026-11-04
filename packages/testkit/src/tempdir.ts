@@ -16,6 +16,6 @@ export async function withTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T
     await mkdir(dir);
     return await fn(dir);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
   }
 }

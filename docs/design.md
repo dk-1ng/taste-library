@@ -55,7 +55,7 @@ Planned building blocks (each confirmed or replaced when its milestone starts): 
 
 - Versions are exact (`savePrefix: ''`), the lockfile is committed and CI installs with `--frozen-lockfile`.
 - pnpm settings live in `pnpm-workspace.yaml`. There is no `.npmrc`: since pnpm 11 it is read only for registry and authentication settings.
-- Shared development tools (TypeScript, type packages, later the linter and the test runner) are root `devDependencies`. Packages declare only their runtime dependencies, plus `@tastelib/testkit` as a `devDependency` when they have tests.
+- Shared development tools (TypeScript, type packages, the linter and the test runner) are root `devDependencies`. Packages declare only their runtime dependencies, plus `@tastelib/testkit` as a `devDependency` when they have tests.
 - No dependency runs install scripts today. A dependency that needs one must be listed in `allowBuilds` in `pnpm-workspace.yaml` (pnpm refuses unlisted ones), with the reason recorded in the same change.
 
 ### Packages and dependency graph
@@ -76,16 +76,16 @@ Each edge is both a `workspace:*` dependency and a TypeScript project reference.
 
 ### Compiler configuration
 
-- `tsconfig.base.json` holds the shared options: `target` and `lib` `es2025`, `module` `nodenext`, `types: []`, `strict`, `noUncheckedIndexedAccess`, `noImplicitOverride`, `verbatimModuleSyntax`, `isolatedModules`, `erasableSyntaxOnly`, `forceConsistentCasingInFileNames`, `skipLibCheck`, `composite`, `declaration`, `declarationMap`, `sourceMap`. Paths use `${configDir}`, so every package compiles `src/` to `dist/` and keeps its `.tsbuildinfo` inside `dist/` (deleting `dist/` forces a rebuild).
-- Each package's `tsconfig.json` extends the base and adds only `types` and `references`. Node packages set `types: ["node"]` and write relative imports with the `.js` extension. `web` sets `module` `esnext`, `moduleResolution` `bundler`, `lib` `["es2025", "dom"]`.
-- The root `tsconfig.json` is a solution file (`files: []`, references to every package) for editors and `tsc -b` from the root.
+- `tsconfig.base.json` holds the shared options: `target` and `lib` `es2025`, `module` `nodenext`, `types: []`, `strict`, `noUncheckedIndexedAccess`, `noImplicitOverride`, `verbatimModuleSyntax`, `isolatedModules`, `erasableSyntaxOnly`, `forceConsistentCasingInFileNames`, `skipLibCheck`, `composite`, `declaration`, `declarationMap`, `sourceMap`. Paths use `${configDir}`, so every package compiles `src/` to `dist/` (`e2e` is the exception: it compiles `tests/` and its Playwright config, declarations only) and keeps its `.tsbuildinfo` inside `dist/` (deleting `dist/` forces a rebuild).
+- Each package's `tsconfig.json` extends the base and adds only `types` and `references`, plus an `exclude` for `*.test.ts` when it has unit tests (type-checked by its `tsconfig.test.json`, §15). Node packages set `types: ["node"]` and write relative imports with the `.js` extension. `web` sets `module` `esnext`, `moduleResolution` `bundler`, `lib` `["es2025", "dom"]`.
+- The root `tsconfig.json` is a solution file (`files: []`, references to every package and to the test configs) for editors and `tsc -b` from the root.
 - The configuration avoids every option that TypeScript 6.0 deprecates, so moving to TypeScript 7 is a version bump (checked: 7.0.2 builds it unchanged).
 
 ### Build
 
 - Each package's `build` script is `tsc -b`. `pnpm -r build` runs them in dependency order; `pnpm build` at the root does the same, and `pnpm clean` runs `tsc -b --clean`.
 - `web` emits with `tsc` only until its app shell lands later in M0 with React and Vite; its build then becomes `tsc -b && vite build`.
-- Scripts in any `package.json` call only cross-platform programs (`tsc`, `pnpm`, later `vite`, `vitest`). No shell built-ins (`rm`, `cp`, `mkdir -p`), no inline environment variables (`FOO=1 cmd`), no quoting or globbing that only a POSIX shell understands. A step that needs more is a Node script.
+- Scripts in any `package.json` call only cross-platform programs (`tsc`, `pnpm`, `vitest`, `playwright`, later `vite`). No shell built-ins (`rm`, `cp`, `mkdir -p`), no inline environment variables (`FOO=1 cmd`), no quoting or globbing that only a POSIX shell understands. A step that needs more is a Node script.
 
 ### Check command, lint and format
 
