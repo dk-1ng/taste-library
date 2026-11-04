@@ -1,10 +1,29 @@
 {
   "files": [],
   "references": [
-    { "path": "packages/core" },
-    { "path": "packages/server" },
-    { "path": "packages/web" },
-    { "path": "packages/cli" },
-    { "path": "packages/mcp" }
+    {
+      "path": "packages/testkit"
+    },
+    {
+      "path": "packages/testkit/tsconfig.test.json"
+    },
+    {
+      "path": "packages/e2e"
+    },
+    {
+      "path": "packages/core"
+    },
+    {
+      "path": "packages/server"
+    },
+    {
+      "path": "packages/web"
+    },
+    {
+      "path": "packages/cli"
+    },
+    {
+      "path": "packages/mcp"
+    }
   ]
 }

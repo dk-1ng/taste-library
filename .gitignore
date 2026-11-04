@@ -35,3 +35,4 @@ desktop.ini
 # Python bytecode (embeds local paths)
 __pycache__/
 *.py[cod]
+dist-test/

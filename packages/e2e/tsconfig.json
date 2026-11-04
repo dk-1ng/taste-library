@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "emitDeclarationOnly": true,
+    "rootDir": "${configDir}",
+    "outDir": "${configDir}/dist",
+    "tsBuildInfoFile": "${configDir}/dist/tsconfig.tsbuildinfo"
+  },
+  "include": ["${configDir}/tests", "${configDir}/playwright.config.ts"],
+  "references": [{ "path": "../testkit" }]
+}

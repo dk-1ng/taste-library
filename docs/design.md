@@ -196,7 +196,19 @@ See [SECURITY.md](../SECURITY.md) for the sensitive surfaces. The local server l
 - CI runs every check on Linux and Windows, including a non-ASCII path and both line endings in inputs.
 - Required checks: `tastelib validate` passes on the sample library; migrations are tested; a made-up briefing full of visual decisions must leak none of them into the intent, and the discarded list must show them all.
 
-**(to specify in M0)** the test layout. The check command is in §3.
+### Test layout
+
+- **Unit tests** use Vitest (5.1.0). They sit next to the code as `src/<name>.test.ts`, are excluded from each package's build (`tsconfig.json` excludes them) and are type-checked by a `tsconfig.test.json` in the package (see `packages/testkit`). Every package has `"test": "vitest run --passWithNoTests"`; the root `pnpm test` runs them all and is part of `pnpm check` (§3). A package that gets its first test also gets `tsconfig.test.json`, its reference in the root `tsconfig.json`, and a `devDependencies` entry for `@tastelib/testkit`.
+- **End-to-end tests** use Playwright (`@playwright/test` 1.64.1) in `packages/e2e`, as `tests/*.e2e.ts`. They are not part of `pnpm check`, because they need a browser download (about 120 MiB). First time: `pnpm test:e2e:install`; then `pnpm test:e2e`. Each test starts its own local HTTP server on an OS-assigned port and serves generated content; nothing touches the network. The package has no `test` script on purpose, so `pnpm test` skips it.
+- **Shared helpers** live in `packages/testkit` (`@tastelib/testkit`, private, dev-only). It has no workspace dependencies and nothing ever lists it under `dependencies`. `core` stays free of other workspace packages at runtime; once `core` has tests it lists `testkit` as a `devDependency` only (a test-time edge, not part of the dependency graph in §3). It offers:
+  - `makePng(width, height, seed)` and `makeBmp(width, height, seed)`: valid images built byte by byte (no image library), deterministic per seed. JPEG and WebP fixtures arrive with the encoder chosen for compression (M2).
+  - `makeHtmlPage({ title, body, images, crlf })`: small HTML pages, with either line ending.
+  - `createSeededRandom(seed)`: the PRNG behind the images (mulberry32).
+  - `withTempDir(fn)`: a fresh temporary directory whose path contains non-ASCII characters (`.../Usuário-日本`), removed afterwards.
+- **Determinism:** fixed seeds, no real network, no dependence on directory listing order or locale; tests that list directories sort the result.
+- **No committed binaries:** images are generated at runtime; CI's media check enforces it.
+
+The check command is in §3.
 
 ## 16. Release and publishing
 
@@ -236,3 +248,4 @@ See [SECURITY.md](../SECURITY.md) for the sensitive surfaces. The local server l
 | 2026-11-04 | TypeScript 6.0.3, with a configuration that already builds unchanged on 7.0. Revisit when the linter chosen in M0 supports TypeScript 7. | TypeScript 7.0.2 (native compiler): no stable programmatic API until 7.1, and `typescript-eslint` 8.72 accepts only `typescript <6.1.0`. Speed does not matter at this size. Running both compilers (7 to build, 6 for tools): two type checkers that can disagree. |
 | 2026-11-04 | Biome 2.6.4 for lint and format. It has its own parser and does not depend on the `typescript` package, so the TypeScript 7 move is not blocked by the linter. | ESLint + Prettier + `typescript-eslint`: three tools and about a dozen dependencies, and `typescript-eslint` ties the linter to the TypeScript version (see the TypeScript row). Biome's type-aware rules are weaker; `tsc` already covers type errors. |
 | 2026-11-04 | Packages build with `tsc -b` and project references, emitting `dist/` with declarations. | A bundler (tsup, tsdown, Rolldown) for the Node packages: an extra dependency that emits nothing `tsc` cannot. Bundling for distribution is decided at release (M7). Source-only packages run through a loader: the CLI and the MCP connector must run on plain Node. |
+| 2026-11-04 | Vitest for unit tests (in `pnpm check`), Playwright for end-to-end tests (separate `pnpm test:e2e`), shared fixture helpers in a dev-only `packages/testkit`, images built by hand (PNG, BMP) instead of with an image library. | Jest (slower with ESM and TypeScript); Playwright inside `pnpm check` (forces a 120 MiB browser download on every install and CI run); helpers copied into each package; `sharp` or `pngjs` for fixtures (a native or extra dependency for something about 60 lines do). |
