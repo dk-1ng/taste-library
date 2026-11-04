@@ -203,7 +203,7 @@ The interface language is a per-machine setting (§4). The library's `language` 
 ## 13. Portability
 
 - Linux and Windows are both first-class (macOS is expected to work).
-- No script that runs on only one operating system. Git hooks are POSIX `sh`, which Git runs on every platform. Workflow helper scripts are Python (standard library only), which runs on every platform.
+- No script that runs on only one operating system. Git hooks are POSIX `sh`, which Git runs on every platform. Workflow helper scripts are plain Node (`.mjs`, no build step, no dependencies), which runs on every platform.
 - Text files use LF (`.gitattributes`); the tool reads either line ending.
 - Library files are UTF-8 without a BOM, LF, in a canonical JSON form (format-spec §3), so the same data gives the same bytes on every system.
 - File names inside a library and a media folder come only from identifiers (ASCII, lowercase, never a Windows reserved name), so they behave the same on case-insensitive file systems and never depend on Unicode normalization. Only the folders the user chooses may have non-ASCII names.
@@ -278,8 +278,9 @@ The check command is in §3.
 | 2026-11-04 | `docs/design.md` is the source of truth and holds this decision log; `docs/format-spec.md` is the separate data contract. | Separate ADR files: the same decision would be written in two places. |
 | 2026-11-04 | Issue-driven workflow: one issue, one branch, one squash-merged PR, reviewed by a separate agent. | Direct commits to `main`. |
 | 2026-11-04 | Until the repository is public, `main` is protected by Claude Code permission rules, a `pre-push` hook and merging only on green CI; a GitHub ruleset is enabled at M7. | Paid plan for branch protection on a private repository. |
-| 2026-11-04 | One issue per session: the maintainer runs `/clear` after each issue and types `continue`; `scripts/loop.py status` reads GitHub and says what to resume or start. | Relying on the agent's memory of earlier sessions. |
-| 2026-11-04 | Workflow helper scripts are Python, standard library only; product code stays TypeScript. | Shell scripts (not portable to Windows); TypeScript before the toolchain exists in M0. |
+| 2026-11-04 | One issue per session: the maintainer runs `/clear` after each issue and types `continue`; `scripts/loop.mjs status` reads GitHub and says what to resume or start. | Relying on the agent's memory of earlier sessions. |
+| 2026-11-04 | Workflow helper scripts are Python, standard library only; product code stays TypeScript. (Superseded on 2026-11-04 by the next row.) | Shell scripts (not portable to Windows); TypeScript before the toolchain exists in M0. |
+| 2026-11-04 | Workflow helper scripts are plain Node (`.mjs`, no build step, no dependencies), tested with `node --test` inside `pnpm check`; no Python anywhere. | Python (a second language and toolchain for contributors and CI once the TypeScript toolchain existed); shell scripts (not portable to Windows). |
 | 2026-11-04 | The maintainer's own Git identity in commits is allowed under the "nothing personal" rule. | Rewriting history to a handle-only identity. |
 | 2026-11-04 | Node 26, the Active LTS line since 2026-10-28 (26.13.0), pinned by `.nvmrc` and `engines` with `engineStrict`. | Node 24: in maintenance since October 2026. An exact patch in `.nvmrc`: blocks security releases without adding reproducibility (the lockfile does not depend on the Node patch). `devEngines.runtime` (pnpm downloads Node): more machinery than a version file every tool already reads. |
 | 2026-11-04 | pnpm 12.16.1 pinned by `packageManager`; pnpm fetches the pinned version itself. | Corepack: no longer shipped with Node 25 and later. A global pnpm with no pin: versions drift between machines and CI. |

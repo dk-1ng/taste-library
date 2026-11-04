@@ -32,7 +32,4 @@ desktop.ini
 # Claude Code: per-user settings stay local; project settings are versioned
 .claude/settings.local.json
 
-# Python bytecode (embeds local paths)
-__pycache__/
-*.py[cod]
 dist-test/
