@@ -1,17 +1,27 @@
 import { randomBytes } from "node:crypto";
-import { lstat, mkdir, open, readFile, realpath, rename, rm } from "node:fs/promises";
+import { lstat, mkdir, open, realpath, rename, rm } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join, parse, win32 } from "node:path";
+import { dirname, join, parse, win32 } from "node:path";
 import { z } from "zod";
 
 /** Per-machine configuration (docs/design.md section 4). Never part of a library. */
 
-const absolutePath = z
-  .string()
-  .min(1)
-  .refine((value) => isAbsolute(value) || win32.isAbsolute(value), {
-    message: "must be an absolute path",
-  });
+/**
+ * Absolute on this operating system only (a Windows path on Linux would be relative to the current
+ * folder), and free of `.` and `..` segments, which could hide the real location from the Git check.
+ */
+function isCleanAbsolutePath(value: string): boolean {
+  const absolute =
+    process.platform === "win32"
+      ? /^[A-Za-z]:[\\/]/.test(value) || /^\\\\[^\\/]+[\\/][^\\/]+/.test(value)
+      : value.startsWith("/");
+  if (!absolute) return false;
+  return !value.split(/[\\/]/).some((segment) => segment === "." || segment === "..");
+}
+
+const absolutePath = z.string().min(1).refine(isCleanAbsolutePath, {
+  message: 'must be an absolute path for this system, without "." or ".." segments',
+});
 
 export const configSchema = z.strictObject({
   version: z.literal(1),
@@ -94,11 +104,23 @@ const MAX_CONFIG_BYTES = 1024 * 1024;
 export async function readConfig(file: string): Promise<Config> {
   let text: string;
   try {
-    const info = await lstat(file);
-    if (info.size > MAX_CONFIG_BYTES) {
-      throw new ConfigError(file, `larger than ${MAX_CONFIG_BYTES} bytes`);
+    // One handle for the size check and the read, so a symbolic link or a change in between cannot bypass the limit.
+    const handle = await open(file, "r");
+    try {
+      const info = await handle.stat();
+      if (!info.isFile()) throw new ConfigError(file, "is not a regular file");
+      if (info.size > MAX_CONFIG_BYTES) {
+        throw new ConfigError(file, `is larger than ${MAX_CONFIG_BYTES} bytes`);
+      }
+      const buffer = Buffer.alloc(MAX_CONFIG_BYTES + 1);
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+      if (bytesRead > MAX_CONFIG_BYTES) {
+        throw new ConfigError(file, `is larger than ${MAX_CONFIG_BYTES} bytes`);
+      }
+      text = buffer.toString("utf8", 0, bytesRead);
+    } finally {
+      await handle.close();
     }
-    text = await readFile(file, "utf8");
   } catch (error) {
     if (error instanceof ConfigError) throw error;
     if (isNodeError(error) && error.code === "ENOENT") return { ...DEFAULT_CONFIG };
@@ -163,23 +185,20 @@ export async function writeConfig(file: string, config: Config): Promise<void> {
   const valid = parseConfig(config, file);
   if (valid.mediaPath !== undefined) await assertMediaOutsideGit(valid.mediaPath, file);
   const folder = dirname(file);
-  await mkdir(folder, { recursive: true });
   const temporary = join(folder, `.config-${randomBytes(6).toString("hex")}.tmp`);
-  const handle = await open(temporary, "wx", 0o600);
   try {
-    await handle.writeFile(`${JSON.stringify(valid, null, 2)}\n`, "utf8");
-    await handle.sync();
-  } catch (error) {
-    await handle.close();
-    await rm(temporary, { force: true });
-    throw error;
-  }
-  await handle.close();
-  try {
+    await mkdir(folder, { recursive: true });
+    const handle = await open(temporary, "wx", 0o600);
+    try {
+      await handle.writeFile(`${JSON.stringify(valid, null, 2)}\n`, "utf8");
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
     await rename(temporary, file);
   } catch (error) {
-    await rm(temporary, { force: true });
-    throw error;
+    await rm(temporary, { force: true }).catch(() => undefined);
+    throw new ConfigError(file, `cannot be written (${errorCode(error)})`);
   }
 }
 
