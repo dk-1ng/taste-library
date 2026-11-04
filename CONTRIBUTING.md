@@ -76,7 +76,7 @@ Enable the repository's Git hooks once per clone:
 git config core.hooksPath .githooks
 ```
 
-The `pre-push` hook refuses pushes to `main` and force pushes.
+`pnpm install` does this for you (the `prepare` script). The `pre-push` hook refuses pushes to `main` and force pushes.
 
 ### Toolchain
 
@@ -91,17 +91,19 @@ Then, from the repository root:
 pnpm install     # installs the exact versions in pnpm-lock.yaml
 pnpm -r build    # builds every package in dependency order (same as: pnpm build)
 pnpm clean       # removes the build output of every package
+pnpm check       # lint, format check, typecheck, test and build: run it before every push
+pnpm format      # rewrites files to the Biome format
 ```
 
 The code lives in `packages/` (`core`, `server`, `web`, `cli`, `mcp`), one workspace package each. Each package compiles `src/` to `dist/` with `tsc -b`; the shared compiler options are in `tsconfig.base.json`.
 
-When you add a dependency, pnpm records the exact version (no `^` ranges) and the lockfile is committed. Shared development tools go in the root `package.json`; a package declares only what it needs at run time. Scripts in any `package.json` must run unchanged on Linux and Windows: no shell built-ins such as `rm` or `cp`, and no inline environment variables. The check command arrives later in M0.
+When you add a dependency, pnpm records the exact version (no `^` ranges) and the lockfile is committed. Shared development tools go in the root `package.json`; a package declares only what it needs at run time. Scripts in any `package.json` must run unchanged on Linux and Windows: no shell built-ins such as `rm` or `cp`, and no inline environment variables. `pnpm check` is the gate CI runs; see `docs/design.md` §3.
 
 Maintainer workflow helpers live in `scripts/` (Python 3.9+, standard library only, plus the GitHub CLI): `python3 scripts/loop.py status` shows what the per-issue loop should do next. Their tests run with `python3 -m unittest discover -s scripts`.
 
 ## Code standards
 
-Defined in M0 and enforced by the check command. Until then: TypeScript, validation with zod at every boundary, tests next to the behavior, synthetic test data generated locally.
+Enforced by `pnpm check`: Biome lint and format, strict TypeScript. In addition: TypeScript, validation with zod at every boundary, tests next to the behavior, synthetic test data generated locally.
 
 ## Labels
 

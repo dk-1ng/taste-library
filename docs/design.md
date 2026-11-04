@@ -47,6 +47,7 @@ Planned building blocks (each confirmed or replaced when its milestone starts): 
 | pnpm | 12.16.1 | root `packageManager` (`pnpm@12.16.1`); pnpm downloads the pinned version itself, so Corepack is not needed |
 | TypeScript | 6.0.3 | root `devDependencies`, exact version |
 | `@types/node` | 26.6.6 | root `devDependencies`, exact version |
+| Biome | 2.6.4 | root `devDependencies`, exact version |
 
 - Versions are exact (`savePrefix: ''`), the lockfile is committed and CI installs with `--frozen-lockfile`.
 - pnpm settings live in `pnpm-workspace.yaml`. There is no `.npmrc`: since pnpm 11 it is read only for registry and authentication settings.
@@ -80,7 +81,15 @@ Each edge is both a `workspace:*` dependency and a TypeScript project reference.
 - `web` emits with `tsc` only until its app shell lands later in M0 with React and Vite; its build then becomes `tsc -b && vite build`.
 - Scripts in any `package.json` call only cross-platform programs (`tsc`, `pnpm`, later `vite`, `vitest`). No shell built-ins (`rm`, `cp`, `mkdir -p`), no inline environment variables (`FOO=1 cmd`), no quoting or globbing that only a POSIX shell understands. A step that needs more is a Node script.
 
-**(to specify in M0)** the check command, lint and format rules.
+### Check command, lint and format
+
+- `pnpm check` is the single gate, run locally, by agents (loop step 5) and in CI: `pnpm lint && pnpm format:check && pnpm typecheck && pnpm test && pnpm build`. It stops at the first failure and exits non-zero.
+- Biome does both linting (`recommended` rules) and formatting (2 spaces, double quotes, semicolons, 100 columns, LF). `pnpm format` rewrites files; `pnpm lint` and `pnpm format:check` only report.
+- Biome is limited to code and data files (`.ts`, `.tsx`, `.js`, `.mjs`, `.json`), listed in `biome.json`. Markdown and YAML are not touched: it would reflow tables and prose in the design documents. It honors `.gitignore`.
+- `pnpm typecheck` is `tsc -b`. `pnpm test` runs each package's `test` script when it has one (`pnpm -r --if-present test`); the test runner arrives with the test infrastructure (§15).
+- `pnpm install` runs `prepare`, which runs `scripts/setup-hooks.mjs`: it sets `core.hooksPath` to `.githooks` in a Git checkout and does nothing elsewhere. New clones get the hooks without a manual step.
+- Dependabot watches the npm ecosystem weekly with a 7-day cooldown, groups development dependencies into one PR and uses the `chore(deps)` prefix.
+
 
 ## 4. Library, media and configuration
 
@@ -225,4 +234,5 @@ See [SECURITY.md](../SECURITY.md) for the sensitive surfaces. The local server l
 | 2026-11-04 | Node 26, the Active LTS line since 2026-10-28 (26.13.0), pinned by `.nvmrc` and `engines` with `engineStrict`. | Node 24: in maintenance since October 2026. An exact patch in `.nvmrc`: blocks security releases without adding reproducibility (the lockfile does not depend on the Node patch). `devEngines.runtime` (pnpm downloads Node): more machinery than a version file every tool already reads. |
 | 2026-11-04 | pnpm 12.16.1 pinned by `packageManager`; pnpm fetches the pinned version itself. | Corepack: no longer shipped with Node 25 and later. A global pnpm with no pin: versions drift between machines and CI. |
 | 2026-11-04 | TypeScript 6.0.3, with a configuration that already builds unchanged on 7.0. Revisit when the linter chosen in M0 supports TypeScript 7. | TypeScript 7.0.2 (native compiler): no stable programmatic API until 7.1, and `typescript-eslint` 8.72 accepts only `typescript <6.1.0`. Speed does not matter at this size. Running both compilers (7 to build, 6 for tools): two type checkers that can disagree. |
+| 2026-11-04 | Biome 2.6.4 for lint and format. It has its own parser and does not depend on the `typescript` package, so the TypeScript 7 move is not blocked by the linter. | ESLint + Prettier + `typescript-eslint`: three tools and about a dozen dependencies, and `typescript-eslint` ties the linter to the TypeScript version (see the TypeScript row). Biome's type-aware rules are weaker; `tsc` already covers type errors. |
 | 2026-11-04 | Packages build with `tsc -b` and project references, emitting `dist/` with declarations. | A bundler (tsup, tsdown, Rolldown) for the Node packages: an extra dependency that emits nothing `tsc` cannot. Bundling for distribution is decided at release (M7). Source-only packages run through a loader: the CLI and the MCP connector must run on plain Node. |
