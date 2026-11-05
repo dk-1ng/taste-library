@@ -116,7 +116,7 @@ Each edge is both a `workspace:*` dependency and a TypeScript project reference.
 | `ids/` | random identifiers, sequential numbers, slugs | pure |
 | `model/` | derived values: effective value (format-spec §13.3), derived state (§7.7), region rounding and timestamp bounds (§4 "Writing library files") | pure |
 | `library-index/` | the index, built from parsed files (§4 "Index") | pure |
-| `changes/` | write plans: what a plan changes, which links are new, link removal for deletions | pure |
+| `changes/` | write plans (what a plan changes and leaves alone), the deletion planners, and link removal for deletions; whether a plan adds a link that does not resolve is judged by the write pipeline in `node/write.ts` | pure |
 | `migrations/` | the step modules `v<N>-to-v<N+1>.ts` (format-spec §15.4) | pure |
 | `node/` | the file-system adapter, reading files, opening and refreshing a library, the atomic replace, the write pipeline and gate, media checks, the migration runner and its recovery, the process probe, and the per-machine config (`config.ts` moves here from `src/`) | Node |
 | `index.ts` | the Node entry, `@tastelib/core`: everything | Node |
