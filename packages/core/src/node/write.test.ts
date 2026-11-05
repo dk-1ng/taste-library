@@ -466,17 +466,14 @@ describe("the write gate", () => {
     });
   });
 
-  it("fails with not-a-library when the library folder moves after it was opened", async () => {
+  it("fails with unreadable-folder when the library folder moves after it was opened", async () => {
     await withGoldenCopy(async (dir, base) => {
       const library = await open(dir);
       await rename(dir, join(base, "moved"));
       const result = await edit(library, "glossary.json", (g) => {
         g.terms[0].entry.content.definition = "Changed.";
       });
-      expect(result).toMatchObject({ status: "failed" });
-      if (result.status === "failed") {
-        expect(["not-a-library", "unreadable-folder"]).toContain(result.failure.code);
-      }
+      expect(result).toMatchObject({ status: "failed", failure: { code: "unreadable-folder" } });
     });
   });
 
