@@ -179,12 +179,19 @@ const Pin = z.strictObject({
 
 /**
  * A record whose keys are checked by a schema. `z.record` skips a key such as `__proto__` without
- * a word, and the user's data is refused, never altered, so that key is refused first.
+ * a word, and the user's data is refused, never altered, so that key is refused first. The issue
+ * is an `unrecognized_keys` one because zod's pipe goes on after that code and only that code, so
+ * the rest of the record is still checked and reported with it.
  */
 function recordOf<K extends z.core.$ZodRecordKey, V extends z.ZodType>(key: K, value: V) {
   const guard = z.unknown().superRefine((input, ctx) => {
     if (typeof input === "object" && input !== null && Object.hasOwn(input, "__proto__")) {
-      addRuleIssue(ctx, ["__proto__"], 'is not allowed; keys are "p0" or the id of a pin.');
+      ctx.addIssue({
+        code: "unrecognized_keys",
+        keys: ["__proto__"],
+        path: [],
+        input: input as Record<string, unknown>,
+      });
     }
   });
   return guard.pipe(z.record(key, value));
@@ -292,9 +299,11 @@ function checkMedia(refId: string, reference: Loose, ctx: z.RefinementCtx): Medi
     const file = stringOf(media.file);
     // A type that disagrees with the kind is reported by that rule; the file name that goes with
     // it is not asked to change as well.
+    const kindKnown = media.kind === "image" || media.kind === "page" || media.kind === "video";
     const typeFitsKind =
       type !== undefined &&
-      (media.kind === "video" ? type.startsWith("video/") : type.startsWith("image/"));
+      (!kindKnown ||
+        (media.kind === "video" ? type.startsWith("video/") : type.startsWith("image/")));
     if (
       typeFitsKind &&
       type !== undefined &&

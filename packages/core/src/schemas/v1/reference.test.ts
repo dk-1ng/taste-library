@@ -1228,7 +1228,9 @@ describe("reference: more cascades", () => {
       configurable: true,
       writable: true,
     });
-    expect(validate(proto)[0]?.message).toContain('keys are "p0" or the id of a pin');
+    expect(validate(proto)[0]?.message).toBe(
+      "interpretations.__proto__: is not a field of this file.",
+    );
   });
 
   it("layout-changing characters in keys are escaped", () => {
@@ -1272,5 +1274,43 @@ describe("reference: last cascades", () => {
   it("an astral format character is written so that it names the same character", () => {
     const found = broken((r) => (r["a\u{e0041}"] = 1));
     expect(found[0]?.message).toContain("\\u{e0041}");
+  });
+});
+
+describe("reference: last round", () => {
+  it("__proto__ in interpretations does not hide the other issues", () => {
+    const r = example();
+    Object.defineProperty(r.interpretations, "__proto__", {
+      value: 1,
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    });
+    r.interpretations.zz = structuredClone(r.interpretations.p0);
+    r.interpretations.p0.proposal.summary = "";
+    expect(
+      validate(r)
+        .map((f) => f.pointer)
+        .sort(),
+    ).toEqual([
+      "/interpretations/__proto__",
+      "/interpretations/p0/proposal/summary",
+      "/interpretations/zz",
+    ]);
+  });
+
+  it("an unknown kind does not hide the file name rule", () => {
+    const r = example();
+    r.media[0].kind = "vidoe";
+    r.media[0].type = "video/mp4";
+    r.media[0].file = `${REF}/m1.webp`;
+    r.pins = [];
+    r.interpretations = {};
+    r.lastIssued.pin = 1;
+    expect(
+      validate(r)
+        .map((f) => f.pointer)
+        .sort(),
+    ).toEqual(["/media/0/file", "/media/0/kind"]);
   });
 });
