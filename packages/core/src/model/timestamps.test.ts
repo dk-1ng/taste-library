@@ -65,6 +65,15 @@ describe("stampFile", () => {
     });
   });
 
+  it("never sets an entry's updatedAt before its createdAt (clock skew)", () => {
+    const future = "2030-01-01T00:00:00.000Z";
+    const previous = { terms: [{ id: "t1", createdAt: future, updatedAt: future, v: 1 }] };
+    const next = { terms: [{ id: "t1", createdAt: future, updatedAt: future, v: 2 }] };
+    expect(stampFile("glossary", previous, next, NOW)).toEqual({
+      terms: [{ id: "t1", createdAt: future, updatedAt: future, v: 2 }],
+    });
+  });
+
   it("gives a new pin createdAt now and keeps an old one", () => {
     const previous = { updatedAt: OLD, createdAt: OLD, pins: [{ id: "pin-1", createdAt: OLD }] };
     const next = {

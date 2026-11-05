@@ -1,5 +1,6 @@
 import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { withTempDir } from "@tastelib/testkit";
 import { describe, expect, it } from "vitest";
 import { editJson, GOLDEN_V1, withGoldenCopy } from "../../test/support/golden.js";
 import { TEST_REGISTRY } from "../../test/support/registry.js";
@@ -534,7 +535,7 @@ describe("concurrent writers", () => {
     });
   });
 
-  it("refuses with write-conflict when a file appears where there was none, removing the folder it made", async () => {
+  it("refuses with write-conflict when a file appears where there was none", async () => {
     await withGoldenCopy(async (dir) => {
       const library = await open(dir);
       const result = await library.write(
@@ -561,6 +562,37 @@ describe("concurrent writers", () => {
     });
   });
 
+  it("removes the folder it made when a backup appears before the rename of a new file", async () => {
+    await withGoldenCopy(async (dir) => {
+      const library = await open(dir);
+      const result = await library.write(
+        (snapshot) => {
+          const project = structuredClone(
+            snapshot.files.get("projects/internal-dashboard/project.json")?.value,
+          ) as Json;
+          project.slug = "fresh-start";
+          return {
+            changes: [{ path: "projects/fresh-start/project.json", next: project }],
+            skipped: [],
+          };
+        },
+        {
+          clock,
+          at: async (point) => {
+            if (point === "before-rename") {
+              await mkdir(join(dir, ".tastelib", "migration-backup"), { recursive: true });
+            }
+          },
+        },
+      );
+      expect(result).toMatchObject({
+        status: "refused",
+        notWritten: ["projects/fresh-start/project.json"],
+      });
+      expect(await readdir(join(dir, "projects"))).not.toContain("fresh-start");
+    });
+  });
+
   it("runs writes through one handle one at a time, each on the result of the last", async () => {
     await withGoldenCopy(async (dir) => {
       const library = await open(dir);
@@ -577,6 +609,77 @@ describe("concurrent writers", () => {
       expect(ids).toContain("term-1a1a1a");
       expect(ids).toContain("term-2b2b2b");
       await expectClean(dir);
+    });
+  });
+});
+
+describe("refusals", () => {
+  it("lists the issues sorted by file, pointer and code", async () => {
+    await withGoldenCopy(async (dir) => {
+      const library = await open(dir);
+      const result = await library.write(
+        (snapshot) => {
+          const family = structuredClone(
+            snapshot.files.get("families/quiet-editorial.json")?.value,
+          ) as Json;
+          family.members = "x";
+          return { changes: [{ path: "families/other-name.json", next: family }], skipped: [] };
+        },
+        { clock },
+      );
+      if (result.status !== "refused") throw new Error("not refused");
+      expect(result.issues.map((i) => [i.pointer, i.code])).toEqual([
+        ["/members", "schema-violation"],
+        ["/slug", "name-mismatch"],
+      ]);
+    });
+  });
+
+  it("refuses a valid value of an older format version when the tool writes a newer one", async () => {
+    await withTempDir(async (dir) => {
+      await writeFile(join(dir, "library.json"), `${JSON.stringify({ formatVersion: 2 })}\n`);
+      const library = await open(dir, TEST_REGISTRY);
+      const result = await library.write(
+        () => ({
+          changes: [{ path: "glossary.json", next: { formatVersion: 1, terms: [] } }],
+          skipped: [],
+        }),
+        { clock },
+      );
+      if (result.status !== "refused") throw new Error("not refused");
+      expect(result.issues.map((i) => [i.code, i.pointer])).toEqual([
+        ["schema-violation", "/formatVersion"],
+      ]);
+      expect(await readdir(dir)).toEqual(["library.json"]);
+    });
+  });
+
+  it("reports a link into a folder that could not be listed as unchecked, not missing", async () => {
+    await withGoldenCopy(async (dir) => {
+      const opened = await openLibrary(dir, {
+        readdir: (async (path: string, ...rest: unknown[]) => {
+          if (path.endsWith("references")) {
+            throw Object.assign(new Error("denied"), { code: "EACCES" });
+          }
+          // biome-ignore lint/suspicious/noExplicitAny: forwards the real call
+          return (readdir as any)(path, ...rest);
+        }) as typeof readdir,
+      });
+      if (!opened.ok) throw new Error(opened.message);
+      const result = await edit(opened.library, "glossary.json", (g) => {
+        g.terms[1].pieces.push(`${A}#p0`);
+      });
+      if (result.status !== "refused") throw new Error("not refused");
+      expect(result.issues[0]?.message).toContain("cannot be checked");
+    });
+  });
+
+  it("rejects a deletion plan as unsupported", async () => {
+    await withGoldenCopy(async (dir) => {
+      const library = await open(dir);
+      await expect(
+        library.write(() => ({ changes: [{ path: "glossary.json", next: null }], skipped: [] })),
+      ).rejects.toThrow("not supported");
     });
   });
 });

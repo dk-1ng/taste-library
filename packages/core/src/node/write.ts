@@ -14,6 +14,7 @@ import { type CrossFile, crossFileIssues, type LinkEvent } from "../validation/c
 import { checkLibraryFile } from "../validation/file.js";
 import { type Issue, makeIssue } from "../validation/issue.js";
 import type { Snapshot } from "../validation/library.js";
+import { sortIssues } from "../validation/report.js";
 import type { OpenFailure, SnapshotResult } from "./open.js";
 import { type IoFailure, replaceFile, type WriteOptions } from "./replace-file.js";
 
@@ -120,8 +121,19 @@ export function kindOfPath(layout: FormatLayout, path: string): LibraryFileKind 
 
 const none: Common = { skipped: [], notices: [] };
 
-function refused(issues: Issue[], skipped: Skipped[] = []): WriteResult {
-  return { status: "refused", issues, written: [], notWritten: [], skipped, notices: [] };
+/**
+ * A refusal, with its issues sorted as in format-spec §16.3. `notWritten` is empty when the
+ * write was refused before it reached the disk, and the file when it was refused at the replace.
+ */
+function refused(issues: Issue[], skipped: Skipped[] = [], notWritten: string[] = []): WriteResult {
+  return {
+    status: "refused",
+    issues: sortIssues(issues),
+    written: [],
+    notWritten,
+    skipped,
+    notices: [],
+  };
 }
 
 function failed(failure: WriteFailure): WriteResult {
@@ -288,6 +300,7 @@ export async function runWrite(
   const [change, ...rest] = plan.changes;
   if (change === undefined) return { status: "unchanged", ...common };
   if (rest.length > 0) throw new Error("A write of more than one file is not supported yet.");
+  if (change.next === null) throw new Error("Deleting a file is not supported yet.");
 
   const registry = context.registry;
   const kind = kindOfPath(currentLayout(registry), change.path);
@@ -355,6 +368,7 @@ export async function runWrite(
         ),
       ],
       plan.skipped,
+      [path],
     );
   }
   if (outcome.failure.errno === "ENOENT" && !outcome.applied) {
