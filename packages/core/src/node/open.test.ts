@@ -1,5 +1,5 @@
 import { mkdir, readdir, rename, rm, symlink, writeFile } from "node:fs/promises";
-import { join, sep } from "node:path";
+import { join } from "node:path";
 import { withTempDir } from "@tastelib/testkit";
 import { describe, expect, it } from "vitest";
 import { editJson, withGoldenCopy } from "../../test/support/golden.js";
@@ -167,7 +167,27 @@ describe("folders that cannot be listed", () => {
       // Every reference, the project and its directions are unknown, so nothing dangles.
       expect(pick(issues, "dangling-link")).toEqual([]);
       expect(JSON.stringify(issues)).not.toContain(library);
-      expect(sep.length).toBe(1);
+    });
+  });
+
+  it("treats a symbolic link that cannot be followed where a format folder belongs as a folder that cannot be listed", async () => {
+    await withGoldenCopy(async (library) => {
+      try {
+        await rm(join(library, "references"), { recursive: true });
+        await symlink(join(library, "nowhere"), join(library, "references"));
+        await rm(join(library, "projects", "internal-dashboard"), { recursive: true });
+        await symlink(join(library, "nowhere"), join(library, "projects", "internal-dashboard"));
+      } catch {
+        return; // creating links needs extra rights on some Windows setups
+      }
+      const issues = await issuesOf(library);
+      expect(pick(issues, "unreadable-file")).toEqual([
+        ["error", "projects/internal-dashboard", null],
+        ["error", "references", null],
+      ]);
+      expect(issues.find((i) => i.file === "references")?.message).toContain("(ENOENT)");
+      expect(pick(issues, "dangling-link")).toEqual([]);
+      expect(pick(issues, "unexpected-file")).toEqual([]);
     });
   });
 
@@ -190,7 +210,7 @@ describe("folders that cannot be listed", () => {
     });
   });
 
-  it("reports a symbolic link that leads to nothing where a file belongs as unreadable-file", async () => {
+  it("reports a symbolic link that cannot be followed where a file belongs as unreadable-file", async () => {
     await withGoldenCopy(async (library) => {
       try {
         await symlink(

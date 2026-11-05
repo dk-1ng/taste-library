@@ -84,8 +84,8 @@ interface Listed {
   /** The names as the file system gave them, to read the file back. */
   ioSegments: string[];
   kind: LibraryFileKind;
-  /** A symbolic link that leads to nothing: the file cannot be read. */
-  brokenLink: boolean;
+  /** The errno code when the entry is a symbolic link that cannot be followed: the file cannot be read. */
+  brokenLink: string | null;
 }
 
 interface Listing {
@@ -95,17 +95,17 @@ interface Listing {
   unlisted: string[];
 }
 
-/** Whether an entry is a folder (following a symbolic link), and whether it is a link that leads to nothing. */
+/** Whether an entry is a folder (following a symbolic link), and the errno code when it is a symbolic link that cannot be followed. */
 async function inspect(
   entry: { isDirectory(): boolean; isSymbolicLink(): boolean },
   path: string,
-): Promise<{ directory: boolean; broken: boolean }> {
-  if (entry.isDirectory()) return { directory: true, broken: false };
-  if (!entry.isSymbolicLink()) return { directory: false, broken: false };
+): Promise<{ directory: boolean; broken: string | null }> {
+  if (entry.isDirectory()) return { directory: true, broken: null };
+  if (!entry.isSymbolicLink()) return { directory: false, broken: null };
   try {
-    return { directory: (await stat(path)).isDirectory(), broken: false };
-  } catch {
-    return { directory: false, broken: true };
+    return { directory: (await stat(path)).isDirectory(), broken: null };
+  } catch (error) {
+    return { directory: false, broken: errno(error) };
   }
 }
 
@@ -148,6 +148,19 @@ async function listLibrary(
       const childPath = relative === "" ? name : `${relative}/${name}`;
       const childIo = [...ioSegments, dirent.name];
       const { directory, broken } = await inspect(dirent, join(root, ...childIo));
+      // A link that cannot be followed where a format folder belongs: the folder cannot be listed.
+      if (broken !== null && classifyEntry(layout, relative, name, true).type === "folder") {
+        listing.unlisted.push(childPath);
+        listing.issues.push(
+          makeIssue(
+            "unreadable-file",
+            childPath,
+            null,
+            `The folder is a symbolic link that cannot be followed (${broken}).`,
+          ),
+        );
+        continue;
+      }
       const entry = classifyEntry(layout, relative, name, directory);
       if (entry.type === "file") {
         listing.files.push({
@@ -210,13 +223,13 @@ async function load(
   if (!listing.files.some((file) => file.path === "library.json")) return notALibrary;
 
   const reads = await mapLimit(listing.files, READ_CONCURRENCY, async (file) => {
-    // A link that leads to nothing is reported, never dropped as if the file were deleted.
-    if (file.brokenLink) {
+    // A link that cannot be followed is reported, never dropped as if the file were deleted.
+    if (file.brokenLink !== null) {
       const issue = makeIssue(
         "unreadable-file",
         file.path,
         null,
-        "The path is a symbolic link that leads to nothing.",
+        `The path is a symbolic link that cannot be followed (${file.brokenLink}).`,
       );
       return { file, result: { status: "failed", issue } as const };
     }
