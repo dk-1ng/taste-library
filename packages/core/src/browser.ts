@@ -1,5 +1,18 @@
 // @tastelib/core/browser: pure modules only; nothing here touches the operating system.
 
+export type { IdOptions, RandomSource, RefIdOptions } from "./ids/random.js";
+export {
+  newGuardrailId,
+  newLibraryId,
+  newRefId,
+  newStatementId,
+  newTermId,
+  randomPart,
+} from "./ids/random.js";
+export type { Issued, SequencePrefix } from "./ids/sequence.js";
+export { issueNext } from "./ids/sequence.js";
+export type { SlugKind, SlugOptions } from "./ids/slug.js";
+export { deriveSlug, MAX_SLUG_LENGTH, makeSlug, shortenSlug } from "./ids/slug.js";
 export type { FileType, FileValue } from "./json/canonical.js";
 export { canonicalIssue, canonicalize, isCanonical, serialize } from "./json/canonical.js";
 export type { ReadFailed, ReadOk, ReadResult } from "./json/read.js";
