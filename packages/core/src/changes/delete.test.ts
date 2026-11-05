@@ -226,6 +226,18 @@ describe("every planner", () => {
     expect([...snapshot.files.values()].map((file) => file.value)).toEqual(before);
   });
 
+  it("sorts the link removals and the skipped files by path, whatever the snapshot's order", () => {
+    const sorted = goldenSnapshot((files) => {
+      files.set("glossary.json", "{ broken");
+      files.set(FAMILY, "{ broken");
+    });
+    const reversed: Snapshot = { ...sorted, files: new Map([...sorted.files].reverse()) };
+    expect([...reversed.files.keys()]).not.toEqual([...sorted.files.keys()]);
+    const plan = planReferenceDeletion(reversed, A);
+    expect(paths(plan)).toEqual([REF_A, "guardrails.json", DIRECTIONS, "taste-profile.json"]);
+    expect(plan.skipped.map((skip) => skip.path)).toEqual([FAMILY, "glossary.json"]);
+  });
+
   it("throws, as a bug, for a malformed identifier", () => {
     const snapshot = goldenSnapshot();
     expect(() => planPinDeletion(snapshot, A, "p0")).toThrow();
