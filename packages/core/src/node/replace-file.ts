@@ -382,6 +382,30 @@ export async function replaceFile(
   }
 }
 
+export type CheckOutcome =
+  | { status: "same" }
+  | { status: "write-conflict"; file: string }
+  | { status: "failed"; failure: IoFailure };
+
+/**
+ * The optimistic check alone, with nothing written: whether `target` still holds `expected` (or is
+ * still absent) and the caller's `conflictCheck` passes. A multi-file write runs it on every target
+ * before its first rename (format-spec §5).
+ */
+export async function checkFile(target: string, options: WriteOptions): Promise<CheckOutcome> {
+  const ctx = context(target, options);
+  try {
+    await checkTarget(ctx, options.expected);
+    return { status: "same" };
+  } catch (error) {
+    if (!(error instanceof Stop)) throw error;
+    const outcome = error.outcome;
+    if (outcome.status === "failed") return { status: "failed", failure: outcome.failure };
+    if (outcome.status === "write-conflict") return outcome;
+    throw new Error("The check ended with a write.");
+  }
+}
+
 /** Removes `target` with the same optimistic check: `write-conflict` when it no longer holds `expected`. */
 export async function removeFile(
   target: string,

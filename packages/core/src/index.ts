@@ -26,6 +26,8 @@ export { openLibrary } from "./node/open.js";
 export type { FileBytes } from "./node/read-file.js";
 export { MAX_JSON_BYTES, readLibraryFileBytes } from "./node/read-file.js";
 export {
+  type CheckOutcome,
+  checkFile,
   type Expected,
   type FileSystem,
   type IoFailure,
@@ -36,12 +38,9 @@ export {
 } from "./node/replace-file.js";
 export {
   type Build,
-  type FileChange,
   kindOfPath,
   type LibraryWriteOptions,
   type Notice,
-  type Plan,
-  type Skipped,
   type WriteFailure,
   type WriteResult,
 } from "./node/write.js";

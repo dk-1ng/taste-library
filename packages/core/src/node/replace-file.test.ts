@@ -3,11 +3,16 @@ import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { join, sep } from "node:path";
 import { withTempDir } from "@tastelib/testkit";
 import { describe, expect, it } from "vitest";
-import { type FileSystem, realFileSystem, removeFile, replaceFile } from "./replace-file.js";
+import { SimulatedCrash } from "../../test/support/crash.js";
+import {
+  checkFile,
+  type FileSystem,
+  realFileSystem,
+  removeFile,
+  replaceFile,
+} from "./replace-file.js";
 
 const bytes = (text: string): Uint8Array => new TextEncoder().encode(text);
-
-class SimulatedCrash extends Error {}
 
 /** Wraps the real file system; `fail` decides which calls throw an errno error. */
 function faulty(
@@ -591,6 +596,78 @@ describe("removeFile", () => {
       });
       expect(result.status).toBe("write-conflict");
       expect(await readFile(target, "utf8")).toBe("theirs");
+    });
+  });
+});
+
+describe("checkFile", () => {
+  it("finds the bytes expected, and a file absent as expected", async () => {
+    await withTempDir(async (dir) => {
+      const target = join(dir, "a.json");
+      await writeFile(target, "old");
+      expect(await checkFile(target, { expected: bytes("old") })).toEqual({ status: "same" });
+      expect(await checkFile(join(dir, "none.json"), { expected: "absent" })).toEqual({
+        status: "same",
+      });
+      expect(await readdir(dir)).toEqual(["a.json"]);
+    });
+  });
+
+  it("gives write-conflict for changed bytes, a file gone, or one that appeared, naming the file", async () => {
+    await withTempDir(async (dir) => {
+      const target = join(dir, "a.json");
+      await writeFile(target, "theirs");
+      expect(await checkFile(target, { expected: bytes("old"), file: "a.json" })).toEqual({
+        status: "write-conflict",
+        file: "a.json",
+      });
+      expect(await checkFile(target, { expected: "absent" })).toMatchObject({
+        status: "write-conflict",
+      });
+      expect(await checkFile(join(dir, "none.json"), { expected: bytes("old") })).toMatchObject({
+        status: "write-conflict",
+      });
+      expect(await readFile(target, "utf8")).toBe("theirs");
+    });
+  });
+
+  it("gives write-conflict when the caller's check says so", async () => {
+    await withTempDir(async (dir) => {
+      const target = join(dir, "a.json");
+      await writeFile(target, "old");
+      const result = await checkFile(target, {
+        expected: bytes("old"),
+        conflictCheck: async () => true,
+      });
+      expect(result.status).toBe("write-conflict");
+    });
+  });
+
+  it("returns an I/O error as a failure, never a throw", async () => {
+    await withTempDir(async (dir) => {
+      const target = join(dir, "a.json");
+      await writeFile(target, "old");
+      const fs = faulty((operation) => (operation === "open" ? "EACCES" : undefined));
+      const result = await checkFile(target, { expected: bytes("old"), file: "a.json", fs });
+      expect(result).toMatchObject({
+        status: "failed",
+        failure: { code: "io-error", operation: "read", file: "a.json", errno: "EACCES" },
+      });
+    });
+  });
+
+  it("lets an exception without an errno propagate", async () => {
+    await withTempDir(async (dir) => {
+      const target = join(dir, "a.json");
+      await writeFile(target, "old");
+      await expect(
+        checkFile(target, {
+          expected: bytes("old"),
+          conflictCheck: async () => {
+            throw new SimulatedCrash("crash");
+          },
+        }),
+      ).rejects.toBeInstanceOf(SimulatedCrash);
     });
   });
 });
