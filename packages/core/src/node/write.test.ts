@@ -4,6 +4,7 @@ import { withTempDir } from "@tastelib/testkit";
 import { describe, expect, it } from "vitest";
 import { editJson, GOLDEN_V1, withGoldenCopy } from "../../test/support/golden.js";
 import { TEST_REGISTRY } from "../../test/support/registry.js";
+import { expectMatchesRebuild } from "../../test/support/rebuild.js";
 import { FORMAT_REGISTRY } from "../browser.js";
 import { currentLayout } from "../format.js";
 import { type Library, openLibrary } from "./open.js";
@@ -87,6 +88,7 @@ describe("writing a library file", () => {
       expect(glossary.terms[0].createdAt).toBe("2026-11-02T12:00:00.000Z");
       expect(glossary.terms[1].updatedAt).toBe("2026-11-03T12:00:00.000Z");
       await expectClean(dir);
+      await expectMatchesRebuild(library, dir);
     });
   });
 
@@ -104,6 +106,7 @@ describe("writing a library file", () => {
       expect(added.createdAt).toBe(NOW.toISOString());
       expect(added.updatedAt).toBe(NOW.toISOString());
       await expectClean(dir);
+      await expectMatchesRebuild(library, dir);
     });
   });
 
@@ -129,6 +132,7 @@ describe("writing a library file", () => {
       expect(project.createdAt).toBe(NOW.toISOString());
       expect(project.updatedAt).toBe(NOW.toISOString());
       await expectClean(dir);
+      await expectMatchesRebuild(library, dir);
     });
   });
 
@@ -145,6 +149,7 @@ describe("writing a library file", () => {
       expect(result.issues.every((i) => i.severity === "error")).toBe(true);
       expect(result.issues[0]?.file).toBe("families/quiet-editorial.json");
       expect(await tree(dir)).toEqual(before);
+      await expectMatchesRebuild(library, dir);
     });
   });
 
@@ -305,6 +310,7 @@ describe("links", () => {
       expect(result.status).toBe("written");
       const glossary = await json(dir, "glossary.json");
       expect(glossary.terms[1].pieces).toEqual([`${MISSING}#p0`]);
+      await expectMatchesRebuild(library, dir);
     });
   });
 
@@ -345,6 +351,7 @@ describe("links", () => {
       });
       expect(result.status).toBe("written");
       await expectClean(dir);
+      await expectMatchesRebuild(library, dir);
     });
   });
 });
@@ -532,6 +539,7 @@ describe("concurrent writers", () => {
       if (result.status === "refused") expect(result.issues[0]?.code).toBe("write-conflict");
       expect((await json(dir, "glossary.json")).terms[0].entry.content.definition).toBe("Theirs.");
       expect((await readdir(dir)).filter((n) => n.includes(".tmp-"))).toEqual([]);
+      await expectMatchesRebuild(library, dir);
     });
   });
 
@@ -609,6 +617,7 @@ describe("concurrent writers", () => {
       expect(ids).toContain("term-1a1a1a");
       expect(ids).toContain("term-2b2b2b");
       await expectClean(dir);
+      await expectMatchesRebuild(library, dir);
     });
   });
 });
@@ -697,6 +706,7 @@ describe("failures", () => {
         notWritten: ["glossary.json"],
       });
       expect((await readdir(dir)).filter((n) => n.includes(".tmp-"))).toEqual([]);
+      await expectMatchesRebuild(library, dir);
     });
   });
 });
