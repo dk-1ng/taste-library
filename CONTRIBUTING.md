@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for your interest. This project is directed by its maintainer and built with AI coding agents (see "How this project is built" in the README). The same rules apply to everyone.
+Thanks for your interest. The repository is public so that the work can be followed, but **outside pull requests are not accepted yet**: there is no license and the workflow is still being set up. Issues are welcome. This project is directed by its maintainer and built with AI coding agents (see "How this project is built" in the README). The same rules apply to everyone.
 
 ## Scope
 

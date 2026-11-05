@@ -4,7 +4,7 @@ A local-first design taste library for people who build with AI coding agents.
 
 [Português (Brasil)](docs/pt-BR/README.md)
 
-> **Status:** early development. Nothing to install yet.
+> **Status:** early development, public so that the work can be followed. Nothing to install yet, no license yet (all rights reserved until the first release), and outside contributions are not accepted yet.
 
 ## What it is for
 
@@ -28,4 +28,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). To report a vulnerability, see [SECURITY
 
 ## License
 
-Not chosen yet; it will be decided before the first public release.
+None yet: all rights are reserved until a license is chosen, before the first release.
