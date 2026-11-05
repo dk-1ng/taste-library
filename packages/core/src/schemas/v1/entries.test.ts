@@ -357,3 +357,158 @@ describe("directions: valid variants", () => {
     ).toEqual([]);
   });
 });
+
+/** Negative cases only (the valid example is checked by `suite` above). */
+function refuses(
+  name: string,
+  schema: z.ZodType,
+  example: () => Loose,
+  cases: [string, (v: Loose) => void, string][],
+) {
+  describe(`${name}: more rules`, () => {
+    for (const [label, mutate, expected] of cases) {
+      it(`refuses: ${label}`, () => {
+        const v = example();
+        mutate(v);
+        expect(check(schema, v)).toEqual([expected]);
+      });
+    }
+  });
+}
+
+const EARLY = "2026-11-04T11:00:00.000Z";
+const refs = (n: number) => Array.from({ length: n }, (_, i) => `ref-20261104-k3x9ab#p${i}`);
+
+refuses("family", FamilySchema, family, [
+  [
+    "a bad vocabulary tag",
+    (v) => (v.description.content.vocabulary = [" x"]),
+    "schema-violation /description/content/vocabulary/0",
+  ],
+]);
+
+refuses("glossary", GlossarySchema, glossary, [
+  [
+    "updatedAt before createdAt",
+    (v) => (v.terms[0].updatedAt = EARLY),
+    "schema-violation /terms/0/updatedAt",
+  ],
+  [
+    "a term with leading whitespace",
+    (v) => (v.terms[0].entry.proposal.term = " x"),
+    "schema-violation /terms/0/entry/proposal/term",
+  ],
+]);
+
+refuses("guardrails", GuardrailsSchema, guardrails, [
+  [
+    "updatedAt before createdAt",
+    (v) => (v.guardrails[0].updatedAt = EARLY),
+    "schema-violation /guardrails/0/updatedAt",
+  ],
+  [
+    "more than 10000 guardrails",
+    (v) => (v.guardrails = Array.from({ length: 10001 }, () => gr("gr-4m8q2z"))),
+    "schema-violation /guardrails",
+  ],
+  [
+    "more than 100 sources",
+    (v) => (v.guardrails[0].sources = refs(101)),
+    "schema-violation /guardrails/0/sources",
+  ],
+]);
+
+refuses("taste profile", TasteProfileSchema, profile, [
+  [
+    "updatedAt before createdAt",
+    (v) => (v.statements[0].updatedAt = EARLY),
+    "schema-violation /statements/0/updatedAt",
+  ],
+  [
+    "more than 2000 statements",
+    (v) => (v.statements = Array.from({ length: 2001 }, () => st("st-1h6v3r"))),
+    "schema-violation /statements",
+  ],
+  [
+    "a text over 2000 characters",
+    (v) => (v.statements[0].statement.content.text = "x".repeat(2001)),
+    "schema-violation /statements/0/statement/content/text",
+  ],
+]);
+
+refuses("project", ProjectSchema, project, [
+  ["an empty what", (v) => (v.intent.content.what = ""), "schema-violation /intent/content/what"],
+  [
+    "an empty forWhom",
+    (v) => (v.intent.content.forWhom = ""),
+    "schema-violation /intent/content/forWhom",
+  ],
+  ["an empty why", (v) => (v.intent.content.why = ""), "schema-violation /intent/content/why"],
+  [
+    "a discarded text over 500 characters",
+    (v) => (v.discarded[0].text = "x".repeat(501)),
+    "schema-violation /discarded/0/text",
+  ],
+]);
+
+refuses("directions", DirectionsSchema, directions, [
+  [
+    "updatedAt before createdAt",
+    (v) => (v.directions[0].updatedAt = EARLY),
+    "schema-violation /directions/0/updatedAt",
+  ],
+  [
+    "more than 100 guardrails",
+    (v) =>
+      (v.directions[0].guardrails = Array.from(
+        { length: 101 },
+        (_, i) =>
+          `gr-${"0123456789abcdefghjkmnpqrstvwxyz"[i % 32]}${"0123456789abcdefghjkmnpqrstvwxyz"[Math.floor(i / 32)]}aaaa`,
+      )),
+    "schema-violation /directions/0/guardrails",
+  ],
+  [
+    "a bad guardrail id",
+    (v) => (v.directions[0].guardrails = ["gr-UPPER"]),
+    "schema-violation /directions/0/guardrails/0",
+  ],
+  [
+    "an empty plan title",
+    (v) => (v.directions[0].plan.content.title = ""),
+    "schema-violation /directions/0/plan/content/title",
+  ],
+  [
+    "an empty plan why",
+    (v) => (v.directions[0].plan.content.why = ""),
+    "schema-violation /directions/0/plan/content/why",
+  ],
+  [
+    "a fractional lastIssued",
+    (v) => (v.lastIssued.direction = 2.5),
+    "schema-violation /lastIssued/direction",
+  ],
+  [
+    "a negative lastIssued",
+    (v) => (v.lastIssued.direction = -1),
+    "schema-violation /lastIssued/direction",
+  ],
+]);
+
+describe("a malformed value that repeats is reported by its own rule only", () => {
+  it("pieces", () => {
+    const v = glossary();
+    v.terms[0].pieces = ["bad", "bad"];
+    expect(check(GlossarySchema, v)).toEqual([
+      "schema-violation /terms/0/pieces/0",
+      "schema-violation /terms/0/pieces/1",
+    ]);
+  });
+  it("direction guardrails", () => {
+    const v = directions();
+    v.directions[0].guardrails = ["bad", "bad"];
+    expect(check(DirectionsSchema, v)).toEqual([
+      "schema-violation /directions/0/guardrails/0",
+      "schema-violation /directions/0/guardrails/1",
+    ]);
+  });
+});

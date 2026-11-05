@@ -10,7 +10,9 @@ import { addRuleIssue, crossCheck, isAfter, listOf, objectOf, stringOf } from ".
 export function uniqueList<T extends z.ZodType>(
   item: T,
   max: number,
-  keyOf: (item: unknown) => string | undefined = (value) => stringOf(value),
+  // By default only a well-formed string is compared: a malformed value is reported once, by its own rule.
+  keyOf: (item: unknown) => string | undefined = (value) =>
+    typeof value === "string" && item.safeParse(value).success ? value : undefined,
   /** Where inside an item the repeated value sits, for the pointer (a member's `target`). */
   inside: string[] = [],
 ) {
