@@ -763,13 +763,17 @@ describe("reference: pins", () => {
     expect(broken((r) => (r.pins[0].note = ""))).toEqual([]);
   });
 
-  it("reports each rule once; a type error hides the rules across fields", () => {
+  it("reports every broken rule, also next to a type error", () => {
     const found = broken((r) => {
       r.pins[0].mediaId = "m9";
       r.pins[0].region.w = 0;
       r.pins[0].polarity = "x";
     });
-    expect(found.map((f) => f.pointer).sort()).toEqual(["/pins/0/polarity", "/pins/0/region/w"]);
+    expect(found.map((f) => f.pointer).sort()).toEqual([
+      "/pins/0/mediaId",
+      "/pins/0/polarity",
+      "/pins/0/region/w",
+    ]);
   });
 
   it("reports a malformed value once, by its own rule", () => {
@@ -992,5 +996,68 @@ describe("reference: frames of an image", () => {
   it("are reported once, as a whole", () => {
     const found = broken((r) => (r.media[0].frames = [...video().frames, ...video().frames]));
     expectOne(found, "schema-violation", "/media/0/frames");
+  });
+});
+
+describe("reference: rules across fields next to type errors", () => {
+  it("still reports duplicate ids, links, counters and dates when another field has the wrong type", () => {
+    const found = broken((r) => {
+      r.note = 5;
+      r.media.push({ ...r.media[0] });
+      r.updatedAt = "2026-11-04T11:00:00.000Z";
+      r.lastIssued.pin = 0;
+    });
+    expect(found.map((f) => `${f.code} ${f.pointer}`).sort()).toEqual([
+      "duplicate-id /media/1/id",
+      "schema-violation /lastIssued/pin",
+      "schema-violation /note",
+      "schema-violation /updatedAt",
+    ]);
+  });
+
+  it("does not fail on raw input of the wrong shape", () => {
+    for (const patch of [
+      { media: "x" },
+      { pins: null },
+      { pins: [1, null, "a"] },
+      { media: [null, 3] },
+      { interpretations: [] },
+      { interpretations: null },
+      { lastIssued: 5 },
+      { source: [] },
+      { media: [{ id: "m1", kind: "video", frames: "x", type: 3 }] },
+    ]) {
+      const r = { ...example(), ...patch };
+      expect(() => validate(r)).not.toThrow();
+      expect(validate(r).length).toBeGreaterThan(0);
+    }
+  });
+
+  it("applies to the kind and type, the region, the review fields and tags", () => {
+    const media = broken((r) => {
+      r.media[0].type = "video/mp4";
+      r.media[0].bytes = "x";
+      r.media[0].file = `${REF}/m1.mp4`;
+    });
+    expect(media.map((f) => f.pointer).sort()).toEqual(["/media/0/bytes", "/media/0/type"]);
+    const region = broken((r) => {
+      r.pins[0].region = { x: 0.9, y: 0, w: 0.5, h: "x" };
+    });
+    expect(region.map((f) => f.pointer).sort()).toEqual(["/pins/0/region/h", "/pins/0/region/w"]);
+    const tags = broken((r) => {
+      r.interpretations.p0.proposal.keywords = ["a", "A", 5];
+    });
+    expect(tags.map((f) => f.pointer).sort()).toEqual([
+      "/interpretations/p0/proposal/keywords/1",
+      "/interpretations/p0/proposal/keywords/2",
+    ]);
+    const review = broken((r) => {
+      r.interpretations.p0.status = "accepted";
+      r.interpretations.p0.proposedBy = 5;
+    });
+    expect(review.map((f) => f.pointer).sort()).toEqual([
+      "/interpretations/p0/proposedBy",
+      "/interpretations/p0/reviewedAt",
+    ]);
   });
 });

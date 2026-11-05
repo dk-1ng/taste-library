@@ -2,11 +2,16 @@ import { z } from "zod";
 import {
   addRuleIssue,
   authored,
+  countOf,
+  crossCheck,
   DirectionId,
   HttpUrl,
   integer,
   isAfter,
   isRefId,
+  type Loose,
+  listOf,
+  objectOf,
   LocalPieceId,
   MediaId,
   Note,
@@ -15,6 +20,7 @@ import {
   Sha256,
   sequenceNumber,
   Slug,
+  stringOf,
   TagList,
   text,
   Timestamp,
@@ -74,39 +80,57 @@ const Media = z
     durationMs: integer(1).nullable(),
     frames: z.array(Frame).max(1000),
   })
-  .superRefine((media, ctx) => {
-    const isVideo = media.kind === "video";
-    if (isVideo && !media.type.startsWith("video/")) {
-      addRuleIssue(ctx, ["type"], 'must be a video type when kind is "video".');
-    } else if (!isVideo && !media.type.startsWith("image/")) {
-      addRuleIssue(ctx, ["type"], `must be an image type when kind is "${media.kind}".`);
-    }
-    if (isVideo && media.durationMs === null) {
-      addRuleIssue(ctx, ["durationMs"], 'must not be null when kind is "video".');
-    } else if (!isVideo && media.durationMs !== null) {
-      addRuleIssue(ctx, ["durationMs"], 'must be null unless kind is "video".');
-    }
-    if (!isVideo && media.frames.length > 0) {
-      addRuleIssue(ctx, ["frames"], 'must be empty unless kind is "video".');
-    }
-    if (!isVideo) return; // frames of an image are reported once, as a whole
-    const firstAt = new Map<number, number>();
-    media.frames.forEach((frame, index) => {
-      const first = firstAt.get(frame.timeMs);
-      if (first !== undefined) {
-        addRuleIssue(ctx, ["frames", index, "timeMs"], `must not repeat frames[${first}].timeMs.`);
-      } else {
-        firstAt.set(frame.timeMs, index);
+  .check(
+    crossCheck((raw, ctx) => {
+      const media = objectOf(raw);
+      const kind = stringOf(media.kind);
+      if (kind !== "image" && kind !== "page" && kind !== "video") return;
+      const isVideo = kind === "video";
+      const type = stringOf(media.type);
+      if (type !== undefined && type in EXTENSION) {
+        if (isVideo && !type.startsWith("video/")) {
+          addRuleIssue(ctx, ["type"], 'must be a video type when kind is "video".');
+        } else if (!isVideo && !type.startsWith("image/")) {
+          addRuleIssue(ctx, ["type"], `must be an image type when kind is "${kind}".`);
+        }
       }
-      if (media.durationMs !== null && frame.timeMs > media.durationMs) {
-        addRuleIssue(
-          ctx,
-          ["frames", index, "timeMs"],
-          `must not be greater than durationMs (${media.durationMs}).`,
-        );
+      const duration = media.durationMs;
+      if (isVideo && duration === null) {
+        addRuleIssue(ctx, ["durationMs"], 'must not be null when kind is "video".');
+      } else if (!isVideo && typeof duration === "number") {
+        addRuleIssue(ctx, ["durationMs"], 'must be null unless kind is "video".');
       }
-    });
-  });
+      const frames = listOf(media.frames);
+      if (!isVideo) {
+        if (frames.length > 0) {
+          addRuleIssue(ctx, ["frames"], 'must be empty unless kind is "video".');
+        }
+        return; // frames of an image are reported once, as a whole
+      }
+      const firstAt = new Map<number, number>();
+      frames.forEach((frame, index) => {
+        const timeMs = countOf(objectOf(frame).timeMs);
+        if (timeMs === undefined) return;
+        const first = firstAt.get(timeMs);
+        if (first !== undefined) {
+          addRuleIssue(
+            ctx,
+            ["frames", index, "timeMs"],
+            `must not repeat frames[${first}].timeMs.`,
+          );
+        } else {
+          firstAt.set(timeMs, index);
+        }
+        if (typeof duration === "number" && timeMs > duration) {
+          addRuleIssue(
+            ctx,
+            ["frames", index, "timeMs"],
+            `must not be greater than durationMs (${duration}).`,
+          );
+        }
+      });
+    }),
+  );
 
 const Region = z
   .strictObject({
@@ -115,14 +139,19 @@ const Region = z
     w: z.number().gt(0),
     h: z.number().gt(0),
   })
-  .superRefine((region, ctx) => {
-    if (region.x + region.w > 1 + REGION_TOLERANCE) {
-      addRuleIssue(ctx, ["w"], "must not reach beyond the right edge: x + w must be at most 1.");
-    }
-    if (region.y + region.h > 1 + REGION_TOLERANCE) {
-      addRuleIssue(ctx, ["h"], "must not reach beyond the bottom edge: y + h must be at most 1.");
-    }
-  });
+  .check(
+    crossCheck((raw, ctx) => {
+      const { x, y, w, h } = objectOf(raw);
+      const finite = (value: unknown): value is number =>
+        typeof value === "number" && Number.isFinite(value);
+      if (finite(x) && finite(w) && x + w > 1 + REGION_TOLERANCE) {
+        addRuleIssue(ctx, ["w"], "must not reach beyond the right edge: x + w must be at most 1.");
+      }
+      if (finite(y) && finite(h) && y + h > 1 + REGION_TOLERANCE) {
+        addRuleIssue(ctx, ["h"], "must not reach beyond the bottom edge: y + h must be at most 1.");
+      }
+    }),
+  );
 
 const Pin = z.strictObject({
   id: PinId,
@@ -184,53 +213,87 @@ export const ReferenceSchema = z
       pin: integer(0),
     }),
   })
-  .superRefine((reference, ctx) => {
-    if (isAfter(reference.createdAt, reference.updatedAt)) {
-      addRuleIssue(ctx, ["updatedAt"], "must not be earlier than createdAt.");
-    }
-    if (reference.source.via === "url-capture" && reference.source.url === null) {
-      addRuleIssue(ctx, ["source", "url"], 'must not be null when via is "url-capture".');
-    }
-    checkMedia(reference, ctx);
-    checkPins(reference, ctx);
-    checkInterpretations(reference, ctx);
-    checkCounters(reference, ctx);
-  });
+  .check(
+    crossCheck((raw, ctx) => {
+      const reference = objectOf(raw);
+      const id = stringOf(reference.id) ?? "";
+      if (isAfter(stringOf(reference.createdAt) ?? "", stringOf(reference.updatedAt) ?? "")) {
+        addRuleIssue(ctx, ["updatedAt"], "must not be earlier than createdAt.");
+      }
+      const source = objectOf(reference.source);
+      if (source.via === "url-capture" && source.url === null) {
+        addRuleIssue(ctx, ["source", "url"], 'must not be null when via is "url-capture".');
+      }
+      const media = Array.isArray(reference.media) ? checkMedia(id, reference, ctx) : undefined;
+      checkPins(reference, media, ctx);
+      checkInterpretations(reference, ctx);
+      checkCounters(reference, ctx);
+    }),
+  );
 
-type ReferenceValue = z.output<typeof ReferenceSchema>;
+/** What the pins need to know about a media item with a well-formed id. */
+type MediaFacts = { kind: string | undefined; frameTimes: Set<number> };
 
-function checkMedia(reference: ReferenceValue, ctx: z.RefinementCtx): void {
-  const seen = new Set<string>();
-  reference.media.forEach((media, index) => {
-    if (MEDIA_ID.test(media.id) && seen.has(media.id))
+function checkMedia(
+  refId: string,
+  reference: Loose,
+  ctx: z.RefinementCtx,
+): Map<string, MediaFacts> {
+  const byId = new Map<string, MediaFacts>();
+  const idIsValid = isRefId(refId);
+  listOf(reference.media).forEach((raw, index) => {
+    const media = objectOf(raw);
+    const id = stringOf(media.id);
+    if (id === undefined || !MEDIA_ID.test(id)) return;
+    if (byId.has(id)) {
       addRuleIssue(
         ctx,
         ["media", index, "id"],
-        `${JSON.stringify(media.id)} is used by more than one media item.`,
+        `${JSON.stringify(id)} is used by more than one media item.`,
         "duplicate-id",
       );
-    seen.add(media.id);
+      return;
+    }
+    const frames = listOf(media.frames);
+    byId.set(id, {
+      kind: stringOf(media.kind),
+      frameTimes: new Set(
+        frames.map((frame) => countOf(objectOf(frame).timeMs)).filter((t) => t !== undefined),
+      ),
+    });
 
     // The expected names are built from the ids, so a malformed id or path is reported once, by
     // its own rule, and not again as a name that does not match.
-    if (!isRefId(reference.id) || !MEDIA_ID.test(media.id)) return;
-    const expected = `${reference.id}/${media.id}.${EXTENSION[media.type]}`;
-    if (MEDIA_PATH.test(media.file) && media.file !== expected) {
-      addRuleIssue(
-        ctx,
-        ["media", index, "file"],
-        `must be "${expected}" (<reference id>/<media id>.<extension of the type>).`,
-      );
+    if (!idIsValid) return;
+    const type = stringOf(media.type);
+    const file = stringOf(media.file);
+    if (type !== undefined && type in EXTENSION && file !== undefined && MEDIA_PATH.test(file)) {
+      const expected = `${refId}/${id}.${EXTENSION[type as keyof typeof EXTENSION]}`;
+      if (file !== expected) {
+        addRuleIssue(
+          ctx,
+          ["media", index, "file"],
+          `must be "${expected}" (<reference id>/<media id>.<extension of the type>).`,
+        );
+      }
     }
     if (media.kind !== "video") return;
-    media.frames.forEach((frame, frameIndex) => {
-      const expectedFrame = `${reference.id}/${media.id}-t${frame.timeMs}.${EXTENSION[frame.type]}`;
+    frames.forEach((rawFrame, frameIndex) => {
+      const frame = objectOf(rawFrame);
+      const timeMs = countOf(frame.timeMs);
+      const frameType = stringOf(frame.type);
+      const frameFile = stringOf(frame.file);
       if (
-        Number.isInteger(frame.timeMs) &&
-        frame.timeMs >= 0 &&
-        MEDIA_PATH.test(frame.file) &&
-        frame.file !== expectedFrame
+        timeMs === undefined ||
+        frameType === undefined ||
+        !(IMAGE_TYPES as readonly string[]).includes(frameType) ||
+        frameFile === undefined ||
+        !MEDIA_PATH.test(frameFile)
       ) {
+        return;
+      }
+      const expectedFrame = `${refId}/${id}-t${timeMs}.${EXTENSION[frameType as keyof typeof EXTENSION]}`;
+      if (frameFile !== expectedFrame) {
         addRuleIssue(
           ctx,
           ["media", index, "frames", frameIndex, "file"],
@@ -239,57 +302,74 @@ function checkMedia(reference: ReferenceValue, ctx: z.RefinementCtx): void {
       }
     });
   });
+  return byId;
 }
 
-function checkPins(reference: ReferenceValue, ctx: z.RefinementCtx): void {
-  const mediaById = new Map<string, ReferenceValue["media"][number]>();
-  for (const media of reference.media) if (!mediaById.has(media.id)) mediaById.set(media.id, media);
-
+function checkPins(
+  reference: Loose,
+  media: Map<string, MediaFacts> | undefined,
+  ctx: z.RefinementCtx,
+): void {
   const seen = new Set<string>();
-  reference.pins.forEach((pin, index) => {
-    if (PIN_ID.test(pin.id) && seen.has(pin.id))
-      addRuleIssue(
-        ctx,
-        ["pins", index, "id"],
-        `${JSON.stringify(pin.id)} is used by more than one pin.`,
-        "duplicate-id",
-      );
-    seen.add(pin.id);
+  listOf(reference.pins).forEach((raw, index) => {
+    const pin = objectOf(raw);
+    const id = stringOf(pin.id);
+    if (id !== undefined && PIN_ID.test(id)) {
+      if (seen.has(id)) {
+        addRuleIssue(
+          ctx,
+          ["pins", index, "id"],
+          `${JSON.stringify(id)} is used by more than one pin.`,
+          "duplicate-id",
+        );
+      }
+      seen.add(id);
+    }
 
-    if (!MEDIA_ID.test(pin.mediaId)) return;
-    const media = mediaById.get(pin.mediaId);
-    if (media === undefined) {
+    const mediaId = stringOf(pin.mediaId);
+    if (mediaId === undefined || !MEDIA_ID.test(mediaId)) return;
+    if (media === undefined) return; // media is not a list: reported by its own rule
+    const target = media.get(mediaId);
+    if (target === undefined) {
       addRuleIssue(
         ctx,
         ["pins", index, "mediaId"],
-        `${JSON.stringify(pin.mediaId)} is not a media item of this reference.`,
+        `${JSON.stringify(mediaId)} is not a media item of this reference.`,
         "broken-local-link",
       );
-    } else if (pin.frameMs !== null && !(Number.isInteger(pin.frameMs) && pin.frameMs >= 0)) {
-      // reported by its own bound
-    } else if (media.kind === "video") {
-      if (pin.frameMs === null || !media.frames.some((frame) => frame.timeMs === pin.frameMs)) {
+      return;
+    }
+    const { frameMs } = pin;
+    if (frameMs !== null && countOf(frameMs) === undefined) return; // reported by its own rule
+    if (frameMs === undefined) return;
+    if (target.kind === "video") {
+      if (frameMs === null || !target.frameTimes.has(frameMs as number)) {
         addRuleIssue(
           ctx,
           ["pins", index, "frameMs"],
-          `must be the timeMs of a frame of video ${media.id}${pin.frameMs === null ? ", not null" : ""}.`,
+          `must be the timeMs of a frame of video ${mediaId}${frameMs === null ? ", not null" : ""}.`,
           "broken-local-link",
         );
       }
-    } else if (pin.frameMs !== null) {
+    } else if (target.kind !== undefined && frameMs !== null) {
       addRuleIssue(
         ctx,
         ["pins", index, "frameMs"],
-        `must be null: ${media.id} is not a video.`,
+        `must be null: ${mediaId} is not a video.`,
         "broken-local-link",
       );
     }
   });
 }
 
-function checkInterpretations(reference: ReferenceValue, ctx: z.RefinementCtx): void {
-  const pieces = new Set(["p0", ...reference.pins.map((pin) => pin.id)]);
-  for (const key of Object.keys(reference.interpretations)) {
+function checkInterpretations(reference: Loose, ctx: z.RefinementCtx): void {
+  const pieces = new Set(["p0"]);
+  for (const raw of listOf(reference.pins)) {
+    const id = stringOf(objectOf(raw).id);
+    if (id !== undefined) pieces.add(id);
+  }
+  if (!Array.isArray(reference.pins)) return;
+  for (const key of Object.keys(objectOf(reference.interpretations))) {
     if (PIECE_ID.test(key) && !pieces.has(key)) {
       addRuleIssue(
         ctx,
@@ -301,18 +381,29 @@ function checkInterpretations(reference: ReferenceValue, ctx: z.RefinementCtx): 
   }
 }
 
-function checkCounters(reference: ReferenceValue, ctx: z.RefinementCtx): void {
-  const highestMedia = Math.max(0, ...reference.media.map((media) => sequenceNumber(media.id)));
+function checkCounters(reference: Loose, ctx: z.RefinementCtx): void {
+  const lastIssued = objectOf(reference.lastIssued);
+  const highest = (list: unknown, pattern: RegExp): number =>
+    Math.max(
+      0,
+      ...listOf(list).flatMap((raw) => {
+        const id = stringOf(objectOf(raw).id);
+        return id !== undefined && pattern.test(id) ? [sequenceNumber(id)] : [];
+      }),
+    );
   // A counter that breaks its own bound (0 media, a negative number) is reported by that bound only.
-  if (reference.lastIssued.media >= 1 && reference.lastIssued.media < highestMedia) {
+  const media = countOf(lastIssued.media);
+  const highestMedia = highest(reference.media, MEDIA_ID);
+  if (media !== undefined && media >= 1 && media < highestMedia) {
     addRuleIssue(
       ctx,
       ["lastIssued", "media"],
       `must be at least ${highestMedia}, the highest media id in use.`,
     );
   }
-  const highestPin = Math.max(0, ...reference.pins.map((pin) => sequenceNumber(pin.id)));
-  if (reference.lastIssued.pin >= 0 && reference.lastIssued.pin < highestPin) {
+  const pin = countOf(lastIssued.pin);
+  const highestPin = highest(reference.pins, PIN_ID);
+  if (pin !== undefined && pin < highestPin) {
     addRuleIssue(
       ctx,
       ["lastIssued", "pin"],

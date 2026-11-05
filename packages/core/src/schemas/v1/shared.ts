@@ -12,6 +12,31 @@ import { z } from "zod";
  * bounds of arrays and numbers, enums) get their message from the mapper.
  */
 
+/** A value that may be anything: the rules across fields run on the raw input (see `crossCheck`). */
+export type Loose = Record<string, unknown>;
+export const isObject = (value: unknown): value is Loose =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+export const objectOf = (value: unknown): Loose => (isObject(value) ? value : {});
+export const listOf = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
+export const stringOf = (value: unknown): string | undefined =>
+  typeof value === "string" ? value : undefined;
+/** A non-negative safe integer, or `undefined`. */
+export const countOf = (value: unknown): number | undefined =>
+  typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+
+/**
+ * A rule across the fields of one object. zod skips an object's refinement when a field inside
+ * it has the wrong type, which would hide these rules until the types are fixed; this check
+ * always runs, so the function receives the raw input and must not trust its shape. It reports a
+ * rule only when the values the rule is about are well-formed, so a malformed value is reported
+ * once, by its own rule.
+ */
+export function crossCheck(fn: (value: unknown, ctx: z.RefinementCtx) => void) {
+  const check = z.superRefine(fn);
+  check._zod.def.when = () => true;
+  return check;
+}
+
 /** The `params.code` of a custom issue that must not be reported as `schema-violation`. */
 export type RuleCode = "duplicate-id" | "broken-local-link";
 
@@ -94,20 +119,23 @@ export function comparisonKey(value: string): string {
 export const TagList: z.ZodType<string[]> = z
   .array(Tag)
   .max(50)
-  .superRefine((tags, ctx) => {
-    const seen = new Map<string, number>();
-    tags.forEach((tag, index) => {
-      const key = comparisonKey(tag);
-      const first = seen.get(key);
-      if (first === undefined) seen.set(key, index);
-      else
-        addRuleIssue(
-          ctx,
-          [index],
-          `must not repeat item ${first} (tags are compared without case or Unicode form).`,
-        );
-    });
-  });
+  .check(
+    crossCheck((tags, ctx) => {
+      const seen = new Map<string, number>();
+      listOf(tags).forEach((tag, index) => {
+        if (typeof tag !== "string") return;
+        const key = comparisonKey(tag);
+        const first = seen.get(key);
+        if (first === undefined) seen.set(key, index);
+        else
+          addRuleIssue(
+            ctx,
+            [index],
+            `must not repeat item ${first} (tags are compared without case or Unicode form).`,
+          );
+      });
+    }),
+  );
 
 /** An integer from `min` to `max` (default: the largest safe integer, 2^53 − 1; format-spec §3.2). */
 export function integer(min: number, max: number = Number.MAX_SAFE_INTEGER): z.ZodType<number> {
@@ -313,21 +341,24 @@ export function authored<T extends z.ZodType>(
       correction: content.nullable(),
       reviewedAt: Timestamp.nullable(),
     })
-    .superRefine((parsed, ctx) => {
-      // The content type is generic, so its fields are read through a narrow view.
-      const value = parsed as unknown as {
-        status: string;
-        correction: unknown;
-        proposedAt: string;
-        reviewedAt: string | null;
-      };
-      if (value.status === "corrected" && value.correction === null) {
-        addRuleIssue(ctx, ["correction"], 'must not be null when status is "corrected".');
-      } else if (value.status !== "corrected" && value.correction !== null) {
-        addRuleIssue(ctx, ["correction"], 'must be null unless status is "corrected".');
-      }
-      checkReview(ctx, value);
-    });
+    .check(
+      crossCheck((raw, ctx) => {
+        const value = objectOf(raw);
+        const status = stringOf(value.status);
+        if (status === "corrected" && value.correction === null) {
+          addRuleIssue(ctx, ["correction"], 'must not be null when status is "corrected".');
+        } else if (
+          status !== undefined &&
+          REVIEW_STATUS.includes(status as (typeof REVIEW_STATUS)[number]) &&
+          status !== "corrected" &&
+          value.correction !== null &&
+          value.correction !== undefined
+        ) {
+          addRuleIssue(ctx, ["correction"], 'must be null unless status is "corrected".');
+        }
+        checkReview(ctx, value);
+      }),
+    );
   return z.discriminatedUnion("origin", [user, agent]);
 }
 
@@ -347,21 +378,26 @@ export function reviewedLink<K extends z.ZodType>(target: K) {
       status: z.enum(LINK_STATUS),
       reviewedAt: Timestamp.nullable(),
     })
-    .superRefine((value, ctx) => checkReview(ctx, value));
+    .check(crossCheck((value, ctx) => checkReview(ctx, objectOf(value))));
   return z.discriminatedUnion("origin", [user, agent]);
 }
 
 /** `reviewedAt` is `null` if and only if the status is `to-review`, and not earlier than `proposedAt`. */
-function checkReview(
-  ctx: z.RefinementCtx,
-  value: { status: string; proposedAt: string; reviewedAt: string | null },
-): void {
-  if (value.status === "to-review") {
-    if (value.reviewedAt !== null)
+function checkReview(ctx: z.RefinementCtx, value: Loose): void {
+  const status = stringOf(value.status);
+  if (status === undefined || !REVIEW_STATUS.includes(status as (typeof REVIEW_STATUS)[number]))
+    return;
+  const { reviewedAt } = value;
+  if (status === "to-review") {
+    if (typeof reviewedAt === "string") {
       addRuleIssue(ctx, ["reviewedAt"], 'must be null when status is "to-review".');
-  } else if (value.reviewedAt === null) {
+    }
+  } else if (reviewedAt === null) {
     addRuleIssue(ctx, ["reviewedAt"], 'must not be null unless status is "to-review".');
-  } else if (isAfter(value.proposedAt, value.reviewedAt)) {
+  } else if (
+    typeof reviewedAt === "string" &&
+    isAfter(stringOf(value.proposedAt) ?? "", reviewedAt)
+  ) {
     addRuleIssue(ctx, ["reviewedAt"], "must not be earlier than proposedAt.");
   }
 }
