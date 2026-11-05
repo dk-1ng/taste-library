@@ -145,16 +145,34 @@ describe("checkMedia", () => {
     },
   );
 
-  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
-    "reports a media folder without permission once",
-    async () => {
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0).each([0o000, 0o600])(
+    "reports a media folder without permission (mode %o) once",
+    async (mode) => {
       await withMedia(async (library, media) => {
-        await chmod(media, 0o000);
+        await chmod(media, mode);
         try {
           const issues = await mediaIssues(library, media);
           expect(issues.map((i) => [i.code, i.file])).toEqual([["unreadable-file", null]]);
         } finally {
           await chmod(media, 0o755);
+        }
+      });
+    },
+  );
+
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+    "reports a listed file that cannot be read as unreadable-file at its media path",
+    async () => {
+      await withMedia(async (library, media, files) => {
+        const file = files[0] as string;
+        const path = join(media, ...file.split("/"));
+        await chmod(path, 0o000);
+        try {
+          expect(brief(await mediaIssues(library, media), "unreadable-file")).toEqual([
+            ["error", `media:${file}`],
+          ]);
+        } finally {
+          await chmod(path, 0o644);
         }
       });
     },

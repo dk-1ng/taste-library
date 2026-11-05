@@ -264,6 +264,7 @@ Each media file is described by `bytes` (its exact size) and `sha256` (§4.4) of
 | Size or checksum differs | `media-mismatch` (warning): the file may be half-synced or damaged; it is never rewritten automatically |
 | The media folder is configured but cannot be read (absent, not a folder, no permission) | `unreadable-file` (error), `file: null`, once; no media file is checked |
 | A media file exists but cannot be read | `unreadable-file` (error) at `media:<path>` |
+| A reference folder of the media folder cannot be listed | `unreadable-file` (error) at `media:<ref-id>`; its files are not orphans |
 | The media path is not a regular file (a folder, a FIFO, …) | `media-mismatch` (warning) |
 | A file in a reference folder of the media folder is named like a media file (`m<n>[-t<ms>].<ext>`, §6.2) and no reference lists it | `orphan-media` (warning). Other names (`.DS_Store`, `desktop.ini`, `Thumbs.db`, `.directory`, …) are ignored. A reference folder that is a link leaving the media folder is not listed. Nothing is an orphan when `references/` or the owner reference cannot be read: what is listed is then unknown |
 
