@@ -98,6 +98,7 @@ Random parts use the lowercase Crockford base32 alphabet `0123456789abcdefghjkmn
 | `AgentLabel` | `^[a-z0-9][a-z0-9._-]{0,63}$` | `claude-code` | label of the writing agent |
 
 - The 8 digits of a `RefId` are the UTC date of creation (`YYYYMMDD`), and must be a valid calendar date. They are informational and are not compared with `createdAt`.
+- The number in a sequential identifier (`m`, `p`, `d`) is an integer of at most 2^53 − 1 (§3.2); a larger number is refused.
 - Sequential identifiers (`m`, `p`, `d`) are **never reused**. The file that holds them records the highest number ever issued (`lastIssued`, §7.1 and §12.2); a new item takes that number plus one, and the counter never goes down, even when the item with the highest number is deleted. A deletion still removes every link to the deleted thing (§14).
 - `p0` is the whole-reference note: a piece that covers every media item of the reference, in id order (for a reference with one media item, that item; for a capture split into segments, every segment). `p1`, `p2`… are pins.
 - **Slugs:** `^[a-z0-9]+(-[a-z0-9]+)*$`, 1–64 characters, and not one of the Windows reserved device names (`con`, `prn`, `aux`, `nul`, `com1`–`com9`, `lpt1`–`lpt9`). **A slug never changes**: renaming changes `name` (or the family's name), not the slug. A slug is derived from the name when the thing is created, in this order:

@@ -8,6 +8,9 @@ import {
   HttpUrl,
   integer,
   isAfter,
+  isMediaId,
+  isPieceId,
+  isPinId,
   isRefId,
   type Loose,
   listOf,
@@ -44,9 +47,6 @@ const MEDIA_TYPES = [...IMAGE_TYPES, "video/mp4", "video/webm"] as const;
 /** Tolerance when comparing proportions (format-spec §7.3). */
 const REGION_TOLERANCE = 1e-9;
 
-const MEDIA_ID = /^m[1-9]\d*$/;
-const PIN_ID = /^p[1-9]\d*$/;
-const PIECE_ID = /^p(0|[1-9]\d*)$/;
 const MEDIA_PATH =
   /^ref-\d{8}-[0-9a-hjkmnp-tv-z]{6}\/m[1-9]\d*(-t(0|[1-9]\d*))?\.(webp|png|jpg|avif|mp4|webm)$/;
 
@@ -263,7 +263,7 @@ function checkMedia(refId: string, reference: Loose, ctx: z.RefinementCtx): Medi
   listOf(reference.media).forEach((raw, index) => {
     const media = objectOf(raw);
     const id = stringOf(media.id);
-    if (id === undefined || !MEDIA_ID.test(id)) {
+    if (id === undefined || !isMediaId(id)) {
       complete = false;
       return;
     }
@@ -338,7 +338,7 @@ function checkPins(reference: Loose, media: MediaIndex | undefined, ctx: z.Refin
   listOf(reference.pins).forEach((raw, index) => {
     const pin = objectOf(raw);
     const id = stringOf(pin.id);
-    if (id !== undefined && PIN_ID.test(id)) {
+    if (id !== undefined && isPinId(id)) {
       if (seen.has(id)) {
         addRuleIssue(
           ctx,
@@ -351,7 +351,7 @@ function checkPins(reference: Loose, media: MediaIndex | undefined, ctx: z.Refin
     }
 
     const mediaId = stringOf(pin.mediaId);
-    if (mediaId === undefined || !MEDIA_ID.test(mediaId)) return;
+    if (mediaId === undefined || !isMediaId(mediaId)) return;
     if (media === undefined) return; // media is not a list: reported by its own rule
     const target = media.byId.get(mediaId);
     if (target === undefined) {
@@ -396,11 +396,11 @@ function checkInterpretations(reference: Loose, ctx: z.RefinementCtx): void {
   for (const raw of reference.pins) {
     const id = stringOf(objectOf(raw).id);
     // A pin whose id is malformed may be the one the key means: reported by its own rule.
-    if (id === undefined || !PIN_ID.test(id)) return;
+    if (id === undefined || !isPinId(id)) return;
     pieces.add(id);
   }
   for (const key of Object.keys(objectOf(reference.interpretations))) {
-    if (PIECE_ID.test(key) && !pieces.has(key)) {
+    if (isPieceId(key) && !pieces.has(key)) {
       addRuleIssue(
         ctx,
         ["interpretations", key],
@@ -413,17 +413,17 @@ function checkInterpretations(reference: Loose, ctx: z.RefinementCtx): void {
 
 function checkCounters(reference: Loose, ctx: z.RefinementCtx): void {
   const lastIssued = objectOf(reference.lastIssued);
-  const highest = (list: unknown, pattern: RegExp): number =>
+  const highest = (list: unknown, isId: (id: string) => boolean): number =>
     Math.max(
       0,
       ...listOf(list).flatMap((raw) => {
         const id = stringOf(objectOf(raw).id);
-        return id !== undefined && pattern.test(id) ? [sequenceNumber(id)] : [];
+        return id !== undefined && isId(id) ? [sequenceNumber(id)] : [];
       }),
     );
   // A counter that breaks its own bound (0 media, a negative number) is reported by that bound only.
   const media = countOf(lastIssued.media);
-  const highestMedia = highest(reference.media, MEDIA_ID);
+  const highestMedia = highest(reference.media, isMediaId);
   if (media !== undefined && media >= 1 && media < highestMedia) {
     addRuleIssue(
       ctx,
@@ -432,7 +432,7 @@ function checkCounters(reference: Loose, ctx: z.RefinementCtx): void {
     );
   }
   const pin = countOf(lastIssued.pin);
-  const highestPin = highest(reference.pins, PIN_ID);
+  const highestPin = highest(reference.pins, isPinId);
   if (pin !== undefined && pin < highestPin) {
     addRuleIssue(
       ctx,

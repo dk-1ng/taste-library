@@ -1156,3 +1156,22 @@ describe("reference: a malformed value is reported once", () => {
     expect(broken((r) => delete r.formatVersion)[0]?.message).toBe("formatVersion: is required.");
   });
 });
+
+describe("reference: limits", () => {
+  it("an id number above 2^53 - 1 is refused once, and lastIssued stays satisfiable", () => {
+    const found = broken((r) => {
+      r.media[0].id = `m${"9".repeat(400)}`;
+      r.media[0].file = `${REF}/m1.webp`;
+    });
+    expect(found.every((f) => !f.message.includes("Infinity"))).toBe(true);
+    expect(found.map((f) => f.pointer)).toContain("/media/0/id");
+  });
+
+  it("a list over its maximum stops the rules of the objects above it", () => {
+    const found = broken((r) => {
+      r.pins.push({ ...r.pins[0] });
+      r.interpretations.p0.proposal.vocabulary = Array.from({ length: 51 }, (_, i) => `t${i}`);
+    });
+    expect(found.map((f) => f.pointer)).toEqual(["/interpretations/p0/proposal/vocabulary"]);
+  });
+});

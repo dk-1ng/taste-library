@@ -153,6 +153,14 @@ describe("identifiers", () => {
       bad(schema, value);
     }
   });
+  it("sequential ids stop at 2^53 − 1", () => {
+    ok(MediaId, "m9007199254740991");
+    bad(MediaId, "m9007199254740992");
+    bad(PinId, `p${"9".repeat(400)}`);
+    bad(LocalPieceId, "p9007199254740992");
+    bad(DirectionId, "d9007199254740992");
+    ok(DirectionId, "d9007199254740991");
+  });
   it("RefId needs a date that exists", () => {
     bad(RefId, "ref-20261301-k3x9ab");
     bad(RefId, "ref-20260230-k3x9ab");

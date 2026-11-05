@@ -232,10 +232,36 @@ export const StatementId = patterned(
   new RegExp(`^st-${CROCKFORD}{6}$`),
   'must be a statement id like "st-1h6v3r".',
 );
-export const MediaId = patterned(/^m[1-9]\d*$/, 'must be a media id like "m1".');
-export const PinId = patterned(/^p[1-9]\d*$/, 'must be a pin id like "p3".');
-export const LocalPieceId = patterned(/^p(0|[1-9]\d*)$/, 'must be a piece id like "p0" or "p2".');
-export const DirectionId = patterned(/^d[1-9]\d*$/, 'must be a direction id like "d2".');
+/** A sequential id: the pattern, and a number that is a safe integer (format-spec §3.2, §4.3). */
+function sequential(pattern: RegExp, message: string) {
+  const isValid = (value: string): boolean =>
+    pattern.test(value) && Number(value.slice(1)) <= Number.MAX_SAFE_INTEGER;
+  const schema: z.ZodType<string> = z.string().superRefine((value, ctx) => {
+    if (!isValid(value)) addRuleIssue(ctx, [], message);
+  });
+  return { schema, isValid };
+}
+
+const media = sequential(
+  /^m[1-9]\d*$/,
+  'must be a media id like "m1", with a number up to 2^53 − 1.',
+);
+const pin = sequential(/^p[1-9]\d*$/, 'must be a pin id like "p3", with a number up to 2^53 − 1.');
+const piece = sequential(
+  /^p(0|[1-9]\d*)$/,
+  'must be a piece id like "p0" or "p2", with a number up to 2^53 − 1.',
+);
+const direction = sequential(
+  /^d[1-9]\d*$/,
+  'must be a direction id like "d2", with a number up to 2^53 − 1.',
+);
+export const MediaId = media.schema;
+export const PinId = pin.schema;
+export const LocalPieceId = piece.schema;
+export const DirectionId = direction.schema;
+export const isMediaId = media.isValid;
+export const isPinId = pin.isValid;
+export const isPieceId = piece.isValid;
 
 /** The sequence number of a `MediaId`, `PinId`, `LocalPieceId` or `DirectionId` (`m3` → 3). */
 export function sequenceNumber(id: string): number {
