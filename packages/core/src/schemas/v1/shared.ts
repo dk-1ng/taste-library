@@ -160,6 +160,13 @@ function patterned(pattern: RegExp, message: string): z.ZodType<string> {
 
 const TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
+/** Whether a string is a UTC timestamp with milliseconds that names a real time (it round-trips). */
+export function isTimestamp(value: string): boolean {
+  if (!TIMESTAMP.test(value)) return false;
+  const time = new Date(value).getTime();
+  return !Number.isNaN(time) && new Date(time).toISOString() === value;
+}
+
 /** `Timestamp`: UTC with milliseconds, and it must round-trip (this rejects February 30). */
 export const Timestamp: z.ZodType<string> = z.string().superRefine((value, ctx) => {
   if (!TIMESTAMP.test(value)) {
@@ -170,15 +177,14 @@ export const Timestamp: z.ZodType<string> = z.string().superRefine((value, ctx) 
     );
     return;
   }
-  const time = new Date(value).getTime();
-  if (Number.isNaN(time) || new Date(time).toISOString() !== value) {
+  if (!isTimestamp(value)) {
     addRuleIssue(ctx, [], "must be a date and time that exist.");
   }
 });
 
 /** Whether `earlier` is later than `later` — false unless both are well-formed timestamps, so a malformed one is reported only by its own rule. */
 export function isAfter(earlier: string, later: string): boolean {
-  return TIMESTAMP.test(earlier) && TIMESTAMP.test(later) && earlier > later;
+  return isTimestamp(earlier) && isTimestamp(later) && earlier > later;
 }
 
 // ---- Identifiers (§4.3) ----
@@ -381,14 +387,14 @@ export function authored<T extends z.ZodType>(
         if (status === "corrected" && value.correction === null) {
           addRuleIssue(ctx, ["correction"], 'must not be null when status is "corrected".');
         } else if (
-          (isObject(value.correction) || typeof value.correction === "string") &&
+          content.safeParse(value.correction).success &&
           status !== undefined &&
           REVIEW_STATUS.includes(status as (typeof REVIEW_STATUS)[number]) &&
           status !== "corrected"
         ) {
           addRuleIssue(ctx, ["correction"], 'must be null unless status is "corrected".');
         }
-        checkReview(ctx, value);
+        checkReview(ctx, value, REVIEW_STATUS);
       }),
     );
   return z.discriminatedUnion("origin", [user, agent]);
@@ -410,15 +416,14 @@ export function reviewedLink<K extends z.ZodType>(target: K) {
       status: z.enum(LINK_STATUS),
       reviewedAt: Timestamp.nullable(),
     })
-    .check(crossCheck((value, ctx) => checkReview(ctx, objectOf(value))));
+    .check(crossCheck((value, ctx) => checkReview(ctx, objectOf(value), LINK_STATUS)));
   return z.discriminatedUnion("origin", [user, agent]);
 }
 
 /** `reviewedAt` is `null` if and only if the status is `to-review`, and not earlier than `proposedAt`. */
-function checkReview(ctx: z.RefinementCtx, value: Loose): void {
+function checkReview(ctx: z.RefinementCtx, value: Loose, allowed: readonly string[]): void {
   const status = stringOf(value.status);
-  if (status === undefined || !REVIEW_STATUS.includes(status as (typeof REVIEW_STATUS)[number]))
-    return;
+  if (status === undefined || !allowed.includes(status)) return;
   const { reviewedAt } = value;
   if (status === "to-review") {
     if (typeof reviewedAt === "string") {

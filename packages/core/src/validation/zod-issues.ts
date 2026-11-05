@@ -20,10 +20,10 @@ type Segment = string | number | symbol;
 
 const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
-/** Writes every control character (U+0000–U+001F, U+007F–U+009F) as a `\uXXXX` escape, so data never reaches a terminal raw. */
+/** Writes every control, format (bidi, zero-width) and line or paragraph separator character as a `\uXXXX` escape, so data never reaches a terminal raw. */
 function escapeControl(text: string): string {
   return text.replace(
-    /\p{Cc}/gu,
+    /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu,
     (c) => `\\u${(c.codePointAt(0) as number).toString(16).padStart(4, "0")}`,
   );
 }
@@ -66,6 +66,8 @@ function genericMessage(issue: z.core.$ZodIssue): string {
   switch (issue.code) {
     case "invalid_type": {
       if (issue.input === undefined) return "is required.";
+      if (issue.expected === "number" && typeof issue.input === "number")
+        return "must be a finite number.";
       return `must be ${TYPE_NAMES[issue.expected] ?? issue.expected}.`;
     }
     case "invalid_value":
@@ -96,7 +98,10 @@ function genericMessage(issue: z.core.$ZodIssue): string {
       return issue.inclusive ? `must be at most ${maximum}.` : `must be less than ${maximum}.`;
     }
     case "invalid_key":
-      return "is not a valid key.";
+      // The key's own rule says what is expected.
+      return (
+        (issue.issues[0] as { message?: string } | undefined)?.message ?? "is not a valid key."
+      );
     default:
       return issue.message;
   }

@@ -184,7 +184,7 @@ const Pin = z.strictObject({
 function recordOf<K extends z.core.$ZodRecordKey, V extends z.ZodType>(key: K, value: V) {
   const guard = z.unknown().superRefine((input, ctx) => {
     if (typeof input === "object" && input !== null && Object.hasOwn(input, "__proto__")) {
-      addRuleIssue(ctx, ["__proto__"], "is not a valid key.");
+      addRuleIssue(ctx, ["__proto__"], 'is not allowed; keys are "p0" or the id of a pin.');
     }
   });
   return guard.pipe(z.record(key, value));
@@ -282,7 +282,7 @@ function checkMedia(refId: string, reference: Loose, ctx: z.RefinementCtx): Medi
     byId.set(id, {
       kind: kind === "image" || kind === "page" || kind === "video" ? kind : undefined,
       frameTimes: new Set(times.filter((t) => t !== undefined)),
-      framesComplete: times.every((t) => t !== undefined),
+      framesComplete: Array.isArray(media.frames) && times.every((t) => t !== undefined),
     });
 
     // The expected names are built from the ids, so a malformed id or path is reported once, by

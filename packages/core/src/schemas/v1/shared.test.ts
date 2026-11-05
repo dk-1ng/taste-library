@@ -317,6 +317,24 @@ describe("ReviewedLink", () => {
     ok(schema, { ...agent, status: "accepted", reviewedAt: T0 });
     ok(schema, { ...agent, status: "rejected", reviewedAt: T0 });
   });
+  it("does not check the review of a status the link cannot have", () => {
+    expect(problems(schema, { ...agent, status: "corrected", reviewedAt: null })).toEqual([
+      "schema-violation /status",
+    ]);
+    expect(
+      problems(schema, { ...agent, status: "corrected", reviewedAt: "2026-01-01T00:00:00.000Z" }),
+    ).toEqual(["schema-violation /status"]);
+  });
+  it("does not compare a proposedAt that names no real time", () => {
+    expect(
+      problems(schema, {
+        ...agent,
+        proposedAt: "2026-11-04T99:00:00.000Z",
+        status: "accepted",
+        reviewedAt: T0,
+      }),
+    ).toEqual(["schema-violation /proposedAt"]);
+  });
   it("refuses the corrected status, bad targets and inconsistent reviews", () => {
     expect(problems(schema, { ...agent, status: "corrected", reviewedAt: T0 })).toEqual([
       "schema-violation /status",

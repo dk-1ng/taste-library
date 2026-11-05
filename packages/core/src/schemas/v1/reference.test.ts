@@ -1175,3 +1175,73 @@ describe("reference: limits", () => {
     expect(found.map((f) => f.pointer)).toEqual(["/interpretations/p0/proposal/vocabulary"]);
   });
 });
+
+describe("reference: more cascades", () => {
+  it("a video whose frames is not a list does not make its pins fail", () => {
+    for (const frames of [{}, null, "x"]) {
+      const r = example();
+      r.media.push({ ...video(), frames });
+      r.lastIssued.media = 2;
+      r.pins.push({ ...r.pins[0], id: "p2", mediaId: "m2", frameMs: 0 });
+      r.lastIssued.pin = 2;
+      expect(validate(r).map((f) => f.pointer)).toEqual(["/media/1/frames"]);
+    }
+  });
+
+  it("a timestamp that names no real time is not compared", () => {
+    const found = broken((r) => {
+      r.createdAt = "2026-02-30T12:00:00.000Z";
+      r.updatedAt = "2026-02-10T12:00:00.000Z";
+    });
+    expect(found.map((f) => f.pointer)).toEqual(["/createdAt"]);
+  });
+
+  it("a malformed correction is reported once: a string, an empty object and a number", () => {
+    for (const correction of ["x", 5, [], {}]) {
+      const found = broken((r) => (r.interpretations.p0.correction = correction));
+      expect(found.length).toBeGreaterThan(0);
+      expect(found.every((f) => !f.message.includes("must be null unless"))).toBe(true);
+    }
+    const valid = {
+      summary: "x",
+      vocabulary: [],
+      keywords: [],
+      screenTypes: [],
+      components: [],
+      aspects: [],
+    };
+    expectOne(
+      broken((r) => (r.interpretations.p0.correction = valid)),
+      "schema-violation",
+      "/interpretations/p0/correction",
+      'interpretations.p0.correction: must be null unless status is "corrected".',
+    );
+  });
+
+  it("invalid keys say what is expected", () => {
+    const zz = broken((r) => (r.interpretations.zz = structuredClone(r.interpretations.p0)));
+    expect(zz[0]?.message).toContain("must be a piece id");
+    const proto = example();
+    Object.defineProperty(proto.interpretations, "__proto__", {
+      value: 1,
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    });
+    expect(validate(proto)[0]?.message).toContain('keys are "p0" or the id of a pin');
+  });
+
+  it("layout-changing characters in keys are escaped", () => {
+    for (const key of ["\u202etxt.exe", "a\u2028b", "a\u200bb", "a\u2029b"]) {
+      const found = broken((r) => (r[key] = 1));
+      expect(found).toHaveLength(1);
+      expect(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(found[0]?.message ?? "")).toBe(false);
+    }
+  });
+
+  it("an infinite number is a number that is too large, not a wrong type", () => {
+    const found = broken((r) => (r.media[0].bytes = Number.POSITIVE_INFINITY));
+    expect(found.map((f) => f.message)).not.toContain("media[0].bytes: must be a number.");
+    expect(found).toHaveLength(1);
+  });
+});
