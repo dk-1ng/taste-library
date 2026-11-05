@@ -1245,3 +1245,32 @@ describe("reference: more cascades", () => {
     expect(found).toHaveLength(1);
   });
 });
+
+describe("reference: last cascades", () => {
+  it("a type that disagrees with the kind does not also ask for another file name", () => {
+    const wrongType = broken((r) => (r.media[0].type = "video/mp4"));
+    expect(wrongType.map((f) => f.pointer)).toEqual(["/media/0/type"]);
+    const r = example();
+    r.media.push({ ...video(), type: "image/png" });
+    r.lastIssued.media = 2;
+    expect(validate(r).map((f) => f.pointer)).toEqual(["/media/1/type"]);
+  });
+
+  it("a malformed reviewedAt next to to-review is reported once", () => {
+    const found = broken((r) => (r.interpretations.p0.reviewedAt = "nope"));
+    expect(found.map((f) => f.pointer)).toEqual(["/interpretations/p0/reviewedAt"]);
+  });
+
+  it("a tag that breaks its own rule is not also reported as a repeat", () => {
+    const found = broken((r) => (r.interpretations.p0.proposal.keywords = [" a", "a", " A"]));
+    expect(found.map((f) => f.pointer).sort()).toEqual([
+      "/interpretations/p0/proposal/keywords/0",
+      "/interpretations/p0/proposal/keywords/2",
+    ]);
+  });
+
+  it("an astral format character is written so that it names the same character", () => {
+    const found = broken((r) => (r["a\u{e0041}"] = 1));
+    expect(found[0]?.message).toContain("\\u{e0041}");
+  });
+});

@@ -22,10 +22,11 @@ const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 /** Writes every control, format (bidi, zero-width) and line or paragraph separator character as a `\uXXXX` escape, so data never reaches a terminal raw. */
 function escapeControl(text: string): string {
-  return text.replace(
-    /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu,
-    (c) => `\\u${(c.codePointAt(0) as number).toString(16).padStart(4, "0")}`,
-  );
+  return text.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, (c) => {
+    const code = c.codePointAt(0) as number;
+    // Above U+FFFF a four-digit escape would name another character.
+    return code > 0xffff ? `\\u{${code.toString(16)}}` : `\\u${code.toString(16).padStart(4, "0")}`;
+  });
 }
 
 /** `pins[0].region.w` for a path; `the file` for the root. */

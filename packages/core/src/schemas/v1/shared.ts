@@ -123,7 +123,8 @@ export const TagList: z.ZodType<string[]> = z
     crossCheck((tags, ctx) => {
       const seen = new Map<string, number>();
       listOf(tags).forEach((tag, index) => {
-        if (typeof tag !== "string") return;
+        // A tag that breaks its own rules is reported by them, not again as a repeat.
+        if (typeof tag !== "string" || !Tag.safeParse(tag).success) return;
         const key = comparisonKey(tag);
         const first = seen.get(key);
         if (first === undefined) seen.set(key, index);
@@ -426,7 +427,7 @@ function checkReview(ctx: z.RefinementCtx, value: Loose, allowed: readonly strin
   if (status === undefined || !allowed.includes(status)) return;
   const { reviewedAt } = value;
   if (status === "to-review") {
-    if (typeof reviewedAt === "string") {
+    if (typeof reviewedAt === "string" && isTimestamp(reviewedAt)) {
       addRuleIssue(ctx, ["reviewedAt"], 'must be null when status is "to-review".');
     }
   } else if (reviewedAt === null) {

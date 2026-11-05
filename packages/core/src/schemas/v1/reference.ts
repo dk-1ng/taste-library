@@ -290,7 +290,13 @@ function checkMedia(refId: string, reference: Loose, ctx: z.RefinementCtx): Medi
     if (!idIsValid) return;
     const type = stringOf(media.type);
     const file = stringOf(media.file);
+    // A type that disagrees with the kind is reported by that rule; the file name that goes with
+    // it is not asked to change as well.
+    const typeFitsKind =
+      type !== undefined &&
+      (media.kind === "video" ? type.startsWith("video/") : type.startsWith("image/"));
     if (
+      typeFitsKind &&
       type !== undefined &&
       Object.hasOwn(EXTENSION, type) &&
       file !== undefined &&
