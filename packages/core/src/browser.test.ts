@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import * as browser from "./browser.js";
 
 describe("the browser entry", () => {
-  it("exports the reader, the schemas, the issue helpers and the canonical writer", () => {
+  it("exports the reader, the schemas, the issue helpers, the canonical writer and the plans", () => {
     for (const name of [
       "readLibraryJson",
       "ReferenceSchema",
@@ -21,6 +21,14 @@ describe("the browser entry", () => {
       "buildSnapshot",
       "reportOf",
       "buildReport",
+      "skipReasonOf",
+      "pieceMatcher",
+      "withoutPieceLinks",
+      "planPinDeletion",
+      "planReferenceDeletion",
+      "planFamilyDeletion",
+      "planGuardrailDeletion",
+      "planDirectionDeletion",
     ]) {
       expect(browser, name).toHaveProperty(name);
     }

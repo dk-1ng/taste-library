@@ -1,5 +1,12 @@
 // @tastelib/core/browser: pure modules only; nothing here touches the operating system.
 
+export {
+  planDirectionDeletion,
+  planFamilyDeletion,
+  planGuardrailDeletion,
+  planPinDeletion,
+  planReferenceDeletion,
+} from "./changes/delete.js";
 export type { FileChange, Plan, SkipReason, Skipped } from "./changes/plan.js";
 export { skipReasonOf } from "./changes/plan.js";
 export type { PieceMatcher } from "./changes/remove-links.js";
