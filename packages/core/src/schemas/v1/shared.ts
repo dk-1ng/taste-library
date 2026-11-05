@@ -279,7 +279,8 @@ export function sequenceNumber(id: string): number {
   return Number(id.slice(1));
 }
 
-const WINDOWS_RESERVED = new Set([
+/** The Windows reserved device names (format-spec §4.3): never a slug. */
+export const WINDOWS_RESERVED: ReadonlySet<string> = new Set([
   "con",
   "prn",
   "aux",
