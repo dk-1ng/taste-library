@@ -23,6 +23,7 @@ import { readLibraryFileBytes } from "./read-file.js";
 const MARKER_FILE = "tastelib-media.json";
 const MARKER_REPORT_FILE = `media:${MARKER_FILE}`;
 const CONCURRENCY = 8;
+const MEDIA_NAME = /^m[1-9]\d*(-t(0|[1-9]\d*))?\.(webp|png|jpg|avif|mp4|webm)$/;
 const REF_FOLDER = /^ref-\d{8}-[0-9a-hjkmnp-tv-z]{6}$/;
 
 export interface MediaCheckOptions {
@@ -278,7 +279,7 @@ async function orphanIssues(
       continue;
     }
     for (const child of [...children].sort(byName)) {
-      if (child.isDirectory()) continue;
+      if (child.isDirectory() || !MEDIA_NAME.test(child.name.normalize("NFC"))) continue;
       const path = `${ref}/${child.name.normalize("NFC")}`;
       if (!listed.has(path)) {
         issues.push(

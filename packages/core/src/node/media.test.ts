@@ -97,6 +97,8 @@ describe("checkMedia", () => {
       await writeFile(join(media, A, "m99.png"), makePng(2, 2, 3));
       await mkdir(join(media, "ref-20269999-zzzzzz"));
       await writeFile(join(media, "ref-20269999-zzzzzz", "m1.png"), makePng(2, 2, 3));
+      await writeFile(join(media, A, ".DS_Store"), "finder");
+      await writeFile(join(media, A, "Thumbs.db"), "windows");
       await writeFile(join(media, "notes.txt"), "not in a reference folder");
       expect(brief(await mediaIssues(library, media), "orphan-media")).toEqual([
         ["warning", `media:${A}/m99.png`],

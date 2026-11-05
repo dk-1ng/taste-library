@@ -262,7 +262,11 @@ Each media file is described by `bytes` (its exact size) and `sha256` (§4.4) of
 | The media folder is not configured on this machine | `media-not-checked` (info), once |
 | The file is missing | `awaiting-sync` (info): it may still be syncing ([design.md](design.md) §4) |
 | Size or checksum differs | `media-mismatch` (warning): the file may be half-synced or damaged; it is never rewritten automatically |
-| A file in a reference folder of the media folder is listed by no reference | `orphan-media` (warning) |
+| The media folder is configured but cannot be read (absent, not a folder, no permission) | `unreadable-file` (error), `file: null`, once; no media file is checked |
+| A media file exists but cannot be read, or the path is not a regular file | `unreadable-file` (error) at `media:<path>`; a path that is not a regular file is `media-mismatch` (warning) |
+| A file in a reference folder of the media folder is named like a media file (`m<n>[-t<ms>].<ext>`, §6.2) and no reference lists it | `orphan-media` (warning). Other names (`.DS_Store`, `desktop.ini`, `Thumbs.db`, `.directory`, …) are ignored. Nothing is an orphan when `references/` or the owner reference cannot be read: what is listed is then unknown |
+
+The marker is read before the files. A marker that is unreadable, invalid or from a newer version is reported (§16.2), and the files are still checked; only `media-folder-mismatch` skips the file checks.
 
 `validate` compares sizes by default and checksums with `--checksums` (§16).
 
