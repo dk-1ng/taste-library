@@ -7,6 +7,7 @@ import {
   type Targets,
   targetFileOf,
 } from "../library-index/targets.js";
+import { type VersionSummary, versionSummary } from "../library-index/versions.js";
 import { comparisonKey } from "../schemas/v1/shared.js";
 import type { FileStatus } from "./file.js";
 import { type Issue, makeIssue } from "./issue.js";
@@ -37,6 +38,8 @@ export interface CrossOptions {
   sha256: (bytes: Uint8Array) => string;
   /** Folders that exist but could not be listed: what lies under one is unknown, so a link into it is unresolved. */
   unlistedFolders?: readonly string[];
+  /** The version summary of these files (`versionSummary`); built here when absent. */
+  versions?: VersionSummary;
   /** The targets of these files (`buildTargets`); built here when absent. */
   targets?: Targets;
   /** Called once for every link of every usable file, resolved or not (the write pipeline uses it to find new links). */
@@ -68,38 +71,29 @@ export function crossFileIssues(
   options: CrossOptions,
 ): Issue[] {
   const issues: Issue[] = [];
-  const library = files.get("library.json");
-  const libraryVersion =
-    library !== undefined && (library.status === "valid" || library.status === "newer")
-      ? library.formatVersion
-      : null;
 
-  // ---- Versions (format-spec §15.2) ----
-  if (library?.status === "valid" && libraryVersion !== null && libraryVersion < options.current) {
+  // ---- Versions (format-spec §15.2), from the version summary of the index ----
+  const versions = options.versions ?? versionSummary(files, options.current);
+  if (versions.needsMigration) {
     issues.push(
       makeIssue(
         "needs-migration",
         null,
         null,
-        `The library is at format version ${libraryVersion} and this tool writes version ${options.current}; it is migrated in memory for reading and on disk before the first write.`,
+        `The library is at format version ${versions.library} and this tool writes version ${options.current}; it is migrated in memory for reading and on disk before the first write.`,
       ),
     );
   }
-  if (libraryVersion !== null) {
-    for (const [path, file] of files) {
-      if (path === "library.json") continue;
-      if (file.status !== "valid" && file.status !== "invalid") continue;
-      if (file.formatVersion !== null && file.formatVersion !== libraryVersion) {
-        issues.push(
-          makeIssue(
-            "mixed-format-versions",
-            path,
-            "/formatVersion",
-            `formatVersion: ${file.formatVersion} differs from ${libraryVersion}, the version in library.json; a write migrates the library first.`,
-          ),
-        );
-      }
-    }
+  for (const path of versions.mixedFiles) {
+    const file = files.get(path);
+    issues.push(
+      makeIssue(
+        "mixed-format-versions",
+        path,
+        "/formatVersion",
+        `formatVersion: ${file?.formatVersion} differs from ${versions.library}, the version in library.json; a write migrates the library first.`,
+      ),
+    );
   }
 
   // ---- Links (format-spec §14), resolved by the one rule of `library-index/targets.ts` ----
