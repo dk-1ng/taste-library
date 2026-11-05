@@ -165,15 +165,21 @@ async function gate(context: WriteContext, snapshot: Snapshot): Promise<WriteRes
   if (library !== undefined && (library.status === "invalid" || library.status === "unreadable")) {
     return refused([...library.issues]);
   }
+  // 4. and 5. answered by the version summary of the index, without another read.
+  const versions = snapshot.index.versions;
   // 4. A file of a newer format anywhere: one issue per file.
-  const newer = [...snapshot.files.values()].filter((file) => file.status === "newer");
-  if (newer.length > 0) return refused(newer.flatMap((file) => [...file.issues]));
+  if (versions.newer.length > 0) {
+    return refused(versions.newer.flatMap((path) => [...(snapshot.files.get(path)?.issues ?? [])]));
+  }
   // 5. An older or mixed library is migrated first, which arrives with the migration runner
   //    (#38). Until then it is refused, so a write never mixes versions.
-  const migration = snapshot.issues.filter(
-    (issue) => issue.code === "needs-migration" || issue.code === "mixed-format-versions",
-  );
-  if (migration.length > 0) return refused(migration);
+  if (versions.needsMigration || versions.mixedFiles.length > 0) {
+    return refused(
+      snapshot.issues.filter(
+        (issue) => issue.code === "needs-migration" || issue.code === "mixed-format-versions",
+      ),
+    );
+  }
   return null;
 }
 

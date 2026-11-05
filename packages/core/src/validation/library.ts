@@ -1,13 +1,16 @@
 import type { FormatRegistry, LibraryFileKind } from "../format.js";
-import { type CrossFile, crossFileIssues } from "./cross.js";
+import { buildIndex, type LibraryIndex } from "../library-index/build.js";
+import { buildTargets } from "../library-index/targets.js";
+import { versionSummary } from "../library-index/versions.js";
+import { type CrossFile, crossFileIssues, type LinkEvent } from "./cross.js";
 import { checkLibraryFile, type FileStatus } from "./file.js";
 import type { Issue } from "./issue.js";
 import { buildReport, mediaNotChecked, type Report, sortIssues } from "./report.js";
 
 /**
  * The snapshot of a library (docs/design.md section 3, "Core modules and API") and the pure
- * function that builds it from what was read: the checks within each file, then the checks across
- * files. Pure: the reading of the folder is in `node/`.
+ * functions that build it from what was read: the checks within each file, then the checks across
+ * files and the index. Pure: the reading of the folder is in `node/`.
  */
 
 /** What reading one listed file gave: its exact bytes, or the issue that tells why not. */
@@ -18,6 +21,8 @@ export interface LibraryEntry {
   path: string;
   kind: LibraryFileKind;
   read: EntryRead;
+  /** The fingerprint of what was read (docs/design.md section 4, "Index", "Freshness"); `null` by default. */
+  fingerprint?: string | null;
 }
 
 export interface SnapshotFile {
@@ -25,6 +30,8 @@ export interface SnapshotFile {
   kind: LibraryFileKind;
   /** The exact bytes read, kept for the optimistic write check (format-spec §5); `null` when the file could not be read. */
   bytes: Uint8Array | null;
+  /** `(size, mtime, ctime, inode)` of the file read, or `null` (a snapshot built in memory, or bytes just written). */
+  fingerprint: string | null;
   formatVersion: number | null;
   status: FileStatus;
   /** The parsed value, only when the file is `valid`. It is not migrated yet: that arrives with the migration runner (#38). */
@@ -36,12 +43,14 @@ export interface SnapshotFile {
 export interface Snapshot {
   /** The version in `library.json`, or `null` when it cannot be read. */
   formatVersion: number | null;
-  /** Sorted by relative path. */
+  /** Sorted by relative path. Each file's kind, fingerprint, version and status live here. */
   files: ReadonlyMap<string, SnapshotFile>;
   /** Every issue of the library, sorted as in format-spec §16.3; media issues are separate (`checkMedia`). */
   issues: readonly Issue[];
   /** Folders (relative paths) that exist but could not be listed: a link into one is unresolved, not dangling. */
   unlistedFolders: readonly string[];
+  /** The index (docs/design.md section 4, "Index"), built from the parsed files. */
+  index: LibraryIndex;
 }
 
 function compareText(a: string, b: string): number {
@@ -49,12 +58,45 @@ function compareText(a: string, b: string): number {
 }
 
 /**
- * Builds the snapshot. `folderIssues` are those found while listing the folders (`unexpected-file`,
+ * The checks within one file: the work per file, which a refresh reuses for a file whose
+ * fingerprint or bytes did not change (docs/design.md section 4, "Index", "How it is built").
+ */
+export function checkEntry(registry: FormatRegistry, entry: LibraryEntry): SnapshotFile {
+  const fingerprint = entry.fingerprint ?? null;
+  if (entry.read.status === "failed") {
+    return {
+      path: entry.path,
+      kind: entry.kind,
+      bytes: null,
+      fingerprint,
+      formatVersion: null,
+      status: "unreadable",
+      value: null,
+      issues: [entry.read.issue],
+    };
+  }
+  const check = checkLibraryFile(registry, entry.kind, entry.path, entry.read.bytes);
+  return {
+    path: entry.path,
+    kind: entry.kind,
+    bytes: entry.read.bytes,
+    fingerprint,
+    formatVersion: check.formatVersion,
+    status: check.status,
+    value: check.value,
+    issues: check.issues,
+  };
+}
+
+/**
+ * Everything library-wide, from the checked files: the cross-file checks, the version summary and
+ * the index, recomputed in full each time (docs/design.md section 4, "Index", "How it is built").
+ * `folderIssues` are those found while listing the folders (`unexpected-file`,
  * `leftover-temp-file`, an unreadable folder).
  */
-export function buildSnapshot(
+export function assembleSnapshot(
   registry: FormatRegistry,
-  entries: readonly LibraryEntry[],
+  checked: Iterable<SnapshotFile>,
   folderIssues: readonly Issue[],
   sha256: (bytes: Uint8Array) => string,
   /** Folders (relative paths) that exist but could not be listed: a link into one is unresolved, not dangling. */
@@ -62,30 +104,7 @@ export function buildSnapshot(
 ): Snapshot {
   const files = new Map<string, SnapshotFile>();
   const issues: Issue[] = [...folderIssues];
-  for (const entry of [...entries].sort((a, b) => compareText(a.path, b.path))) {
-    let file: SnapshotFile;
-    if (entry.read.status === "failed") {
-      file = {
-        path: entry.path,
-        kind: entry.kind,
-        bytes: null,
-        formatVersion: null,
-        status: "unreadable",
-        value: null,
-        issues: [entry.read.issue],
-      };
-    } else {
-      const check = checkLibraryFile(registry, entry.kind, entry.path, entry.read.bytes);
-      file = {
-        path: entry.path,
-        kind: entry.kind,
-        bytes: entry.read.bytes,
-        formatVersion: check.formatVersion,
-        status: check.status,
-        value: check.value,
-        issues: check.issues,
-      };
-    }
+  for (const file of [...checked].sort((a, b) => compareText(a.path, b.path))) {
     files.set(file.path, file);
     issues.push(...file.issues);
   }
@@ -99,14 +118,46 @@ export function buildSnapshot(
       value: file.value,
     });
   }
-  issues.push(...crossFileIssues(cross, { current: registry.current, sha256, unlistedFolders }));
+  const current = registry.current;
+  const versions = versionSummary(cross, current);
+  const targets = buildTargets(cross, current, unlistedFolders);
+  const links: LinkEvent[] = [];
+  issues.push(
+    ...crossFileIssues(cross, {
+      current,
+      sha256,
+      unlistedFolders,
+      versions,
+      targets,
+      onLink: (link) => void links.push(link),
+    }),
+  );
 
   return {
     formatVersion: files.get("library.json")?.formatVersion ?? null,
     files,
     issues: sortIssues(issues),
     unlistedFolders,
+    index: buildIndex({ files: cross, current, targets, links, versions }),
   };
+}
+
+/** Builds the snapshot from what was read: `checkEntry` for each file, then `assembleSnapshot`. */
+export function buildSnapshot(
+  registry: FormatRegistry,
+  entries: readonly LibraryEntry[],
+  folderIssues: readonly Issue[],
+  sha256: (bytes: Uint8Array) => string,
+  /** Folders (relative paths) that exist but could not be listed: a link into one is unresolved, not dangling. */
+  unlistedFolders: readonly string[] = [],
+): Snapshot {
+  return assembleSnapshot(
+    registry,
+    entries.map((entry) => checkEntry(registry, entry)),
+    folderIssues,
+    sha256,
+    unlistedFolders,
+  );
 }
 
 /**
