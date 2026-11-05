@@ -1,6 +1,6 @@
+import type { LibraryFileKind } from "../format.js";
 import type { FileValue } from "../json/canonical.js";
 import { comparisonKey } from "../schemas/v1/shared.js";
-import type { LibraryFileKind } from "../format.js";
 import type { FileStatus } from "./file.js";
 import { type Issue, makeIssue } from "./issue.js";
 import { describePath, pointerOf } from "./zod-issues.js";
@@ -30,6 +30,25 @@ export interface CrossOptions {
   sha256: (bytes: Uint8Array) => string;
   /** Folders that exist but could not be listed: what lies under one is unknown, so a link into it is unresolved. */
   unlistedFolders?: readonly string[];
+  /** Called once for every link of every usable file, resolved or not (the write pipeline uses it to find new links). */
+  onLink?: (link: LinkEvent) => void;
+}
+
+/**
+ * One link of a file. `holder` is what holds the link: the id of the entry (a term, guardrail,
+ * statement or direction) or, for a link outside entries, the field (`members`, `result`), so a
+ * link is "the same" when its holder and target are (docs/design.md section 4, "Writing library
+ * files", layer 4). `target` names what it points to.
+ */
+export interface LinkEvent {
+  file: string;
+  pointer: string;
+  holder: string;
+  target: string;
+  /** The file that should hold the target, relative to the library. */
+  targetFile: string;
+  /** `unresolved`: the target file exists but is not `valid`, so whether it holds the target is unknown. */
+  state: "resolved" | "dangling" | "unresolved";
 }
 
 type Path = (string | number)[];
@@ -91,6 +110,10 @@ export function crossFileIssues(
     return { value: file.value as FileValue<K> };
   };
 
+  /** The state of a link to a whole file (a project, a family): `found` counts as resolved. */
+  const stateOf = (target: object | string): LinkEvent["state"] =>
+    target === "absent" ? "dangling" : target === "unresolved" ? "unresolved" : "resolved";
+
   const pieceIds = new Map<string, Set<string> | "absent" | "unresolved">();
   const piecesOf = (refId: string): Set<string> | "absent" | "unresolved" => {
     let cached = pieceIds.get(refId);
@@ -105,7 +128,23 @@ export function crossFileIssues(
     return cached;
   };
 
-  const dangling = (file: string, path: Path, what: string): void => {
+  const link = (
+    file: string,
+    path: Path,
+    holder: string,
+    what: string,
+    targetFile: string,
+    state: LinkEvent["state"],
+  ): void => {
+    options.onLink?.({
+      file,
+      pointer: pointerOf(path) ?? "",
+      holder,
+      target: what,
+      targetFile,
+      state,
+    });
+    if (state !== "dangling") return;
     issues.push(
       makeIssue(
         "dangling-link",
@@ -116,11 +155,15 @@ export function crossFileIssues(
     );
   };
 
-  const checkPiece = (file: string, path: Path, ref: string): void => {
+  const checkPiece = (file: string, path: Path, holder: string, ref: string): void => {
     const [refId = "", pieceId = ""] = ref.split("#");
     const pieces = piecesOf(refId);
-    if (pieces === "unresolved") return;
-    if (pieces === "absent" || !pieces.has(pieceId)) dangling(file, path, `piece ${ref}`);
+    const what = `piece ${ref}`;
+    const target = `references/${refId}.json`;
+    if (pieces === "unresolved") link(file, path, holder, what, target, "unresolved");
+    else if (pieces === "absent" || !pieces.has(pieceId)) {
+      link(file, path, holder, what, target, "dangling");
+    } else link(file, path, holder, what, target, "resolved");
   };
 
   for (const [path, file] of files) {
@@ -130,22 +173,31 @@ export function crossFileIssues(
         const reference = file.value as FileValue<"reference">;
         const result = reference.result;
         if (result !== null) {
-          if (usable(`projects/${result.project}/project.json`, "project") === "absent") {
-            dangling(path, ["result", "project"], `project "${result.project}"`);
-          }
+          const project = usable(`projects/${result.project}/project.json`, "project");
+          link(
+            path,
+            ["result", "project"],
+            "result",
+            `project "${result.project}"`,
+            `projects/${result.project}/project.json`,
+            stateOf(project),
+          );
           if (result.direction !== null) {
             const directions = usable(`projects/${result.project}/directions.json`, "directions");
-            if (
-              directions === "absent" ||
-              (typeof directions !== "string" &&
-                !directions.value.directions.some((entry) => entry.id === result.direction))
-            ) {
-              dangling(
-                path,
-                ["result", "direction"],
-                `direction ${result.direction} of project "${result.project}"`,
-              );
-            }
+            const found =
+              typeof directions === "string"
+                ? directions
+                : directions.value.directions.some((entry) => entry.id === result.direction)
+                  ? "found"
+                  : "absent";
+            link(
+              path,
+              ["result", "direction"],
+              "result",
+              `direction ${result.direction} of project "${result.project}"`,
+              `projects/${result.project}/directions.json`,
+              stateOf(found),
+            );
           }
         }
         staleProposals(path, reference, options.sha256, issues);
@@ -154,7 +206,7 @@ export function crossFileIssues(
       case "family": {
         const family = file.value as FileValue<"family">;
         family.members.forEach((member, index) => {
-          checkPiece(path, ["members", index, "target"], member.target);
+          checkPiece(path, ["members", index, "target"], "members", member.target);
         });
         break;
       }
@@ -162,7 +214,7 @@ export function crossFileIssues(
         const glossary = file.value as FileValue<"glossary">;
         glossary.terms.forEach((term, termIndex) => {
           term.pieces.forEach((ref, index) => {
-            checkPiece(path, ["terms", termIndex, "pieces", index], ref);
+            checkPiece(path, ["terms", termIndex, "pieces", index], term.id, ref);
           });
         });
         duplicateTerms(path, glossary, issues);
@@ -172,7 +224,7 @@ export function crossFileIssues(
         const guardrails = file.value as FileValue<"guardrails">;
         guardrails.guardrails.forEach((guardrail, guardrailIndex) => {
           guardrail.sources.forEach((ref, index) => {
-            checkPiece(path, ["guardrails", guardrailIndex, "sources", index], ref);
+            checkPiece(path, ["guardrails", guardrailIndex, "sources", index], guardrail.id, ref);
           });
         });
         break;
@@ -181,7 +233,7 @@ export function crossFileIssues(
         const profile = file.value as FileValue<"taste-profile">;
         profile.statements.forEach((statement, statementIndex) => {
           statement.evidence.forEach((ref, index) => {
-            checkPiece(path, ["statements", statementIndex, "evidence", index], ref);
+            checkPiece(path, ["statements", statementIndex, "evidence", index], statement.id, ref);
           });
         });
         break;
@@ -192,18 +244,34 @@ export function crossFileIssues(
         directions.directions.forEach((direction, directionIndex) => {
           const at: Path = ["directions", directionIndex];
           if (direction.family !== null) {
-            if (usable(`families/${direction.family}.json`, "family") === "absent") {
-              dangling(path, [...at, "family"], `family "${direction.family}"`);
-            }
+            const family = usable(`families/${direction.family}.json`, "family");
+            link(
+              path,
+              [...at, "family"],
+              direction.id,
+              `family "${direction.family}"`,
+              `families/${direction.family}.json`,
+              stateOf(family),
+            );
           }
           direction.pieces.forEach((ref, index) => {
-            checkPiece(path, [...at, "pieces", index], ref);
+            checkPiece(path, [...at, "pieces", index], direction.id, ref);
           });
           direction.guardrails.forEach((id, index) => {
-            if (guardrails === "unresolved") return;
-            if (guardrails === "absent" || !guardrails.value.guardrails.some((g) => g.id === id)) {
-              dangling(path, [...at, "guardrails", index], `guardrail ${id}`);
-            }
+            const state: LinkEvent["state"] =
+              guardrails === "unresolved"
+                ? "unresolved"
+                : guardrails === "absent" || !guardrails.value.guardrails.some((g) => g.id === id)
+                  ? "dangling"
+                  : "resolved";
+            link(
+              path,
+              [...at, "guardrails", index],
+              direction.id,
+              `guardrail ${id}`,
+              "guardrails.json",
+              state,
+            );
           });
         });
         break;
