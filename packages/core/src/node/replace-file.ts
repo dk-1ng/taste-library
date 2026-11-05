@@ -1,6 +1,6 @@
 import { constants } from "node:fs";
 import * as fsPromises from "node:fs/promises";
-import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { randomPart, type RandomSource } from "../ids/random.js";
 
 /**
@@ -229,7 +229,7 @@ async function createMissingFolders(ctx: Context, folder: string): Promise<strin
   if (root !== undefined) {
     // `relative` is case-insensitive on Windows and ignores trailing separators.
     const inside = relative(root, folder);
-    if (inside.startsWith("..") || isAbsolute(inside)) {
+    if (inside === ".." || inside.startsWith(`..${sep}`) || isAbsolute(inside)) {
       throw new Stop({
         status: "failed",
         failure: {
