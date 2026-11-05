@@ -202,54 +202,62 @@ describe("replaceFile", () => {
     });
   });
 
-  it("reports a failed folder flush as applied: the file is already written", async () => {
-    await withTempDir(async (dir) => {
-      const target = join(dir, "refs", "a.json");
-      const result = await replaceFile(target, bytes("NEW"), {
-        expected: "absent",
-        durable: true,
-        platform: "linux",
-        fs: faulty((operation, path) =>
-          operation === "open" && path === join(dir, "refs") ? "EIO" : undefined,
-        ),
+  // A directory cannot be opened for reading on Windows, where the flush is skipped anyway.
+  it.skipIf(process.platform === "win32")(
+    "reports a failed folder flush as applied: the file is already written",
+    async () => {
+      await withTempDir(async (dir) => {
+        const target = join(dir, "refs", "a.json");
+        const result = await replaceFile(target, bytes("NEW"), {
+          expected: "absent",
+          durable: true,
+          platform: "linux",
+          fs: faulty((operation, path) =>
+            operation === "open" && path === join(dir, "refs") ? "EIO" : undefined,
+          ),
+        });
+        expect(result).toMatchObject({
+          status: "failed",
+          applied: true,
+          createdFolders: [join(dir, "refs")],
+          failure: { operation: "sync-folder", errno: "EIO" },
+        });
+        expect(await readFile(target, "utf8")).toBe("NEW");
       });
-      expect(result).toMatchObject({
-        status: "failed",
-        applied: true,
-        createdFolders: [join(dir, "refs")],
-        failure: { operation: "sync-folder", errno: "EIO" },
-      });
-      expect(await readFile(target, "utf8")).toBe("NEW");
-    });
-  });
+    },
+  );
 
-  it("flushes the parent of every folder it created, and skips flushing on Windows", async () => {
-    await withTempDir(async (dir) => {
-      const flushed: string[] = [];
-      const watching = faulty((operation, path) => {
-        if (operation === "open" && !path.includes(".tmp-") && !path.endsWith(".json")) {
-          flushed.push(path);
-        }
-        return undefined;
-      });
-      await replaceFile(join(dir, "projects", "p", "a.json"), bytes("x"), {
-        expected: "absent",
-        durable: true,
-        platform: "linux",
-        fs: watching,
-      });
-      expect(flushed).toEqual([dir, join(dir, "projects"), join(dir, "projects", "p")]);
+  // A directory cannot be opened for reading on Windows, where the flush is skipped anyway.
+  it.skipIf(process.platform === "win32")(
+    "flushes the parent of every folder it created, and skips flushing on Windows",
+    async () => {
+      await withTempDir(async (dir) => {
+        const flushed: string[] = [];
+        const watching = faulty((operation, path) => {
+          if (operation === "open" && !path.includes(".tmp-") && !path.endsWith(".json")) {
+            flushed.push(path);
+          }
+          return undefined;
+        });
+        await replaceFile(join(dir, "projects", "p", "a.json"), bytes("x"), {
+          expected: "absent",
+          durable: true,
+          platform: "linux",
+          fs: watching,
+        });
+        expect(flushed).toEqual([dir, join(dir, "projects"), join(dir, "projects", "p")]);
 
-      flushed.length = 0;
-      await replaceFile(join(dir, "b.json"), bytes("x"), {
-        expected: "absent",
-        durable: true,
-        platform: "win32",
-        fs: watching,
+        flushed.length = 0;
+        await replaceFile(join(dir, "b.json"), bytes("x"), {
+          expected: "absent",
+          durable: true,
+          platform: "win32",
+          fs: watching,
+        });
+        expect(flushed).toEqual([]);
       });
-      expect(flushed).toEqual([]);
-    });
-  });
+    },
+  );
 
   it("never creates folders above the library root", async () => {
     await withTempDir(async (dir) => {
