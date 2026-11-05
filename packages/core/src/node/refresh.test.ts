@@ -308,6 +308,58 @@ describe("the cache", () => {
     });
   });
 
+  it("returns a new snapshot when the failure of a file changes and it still has no fingerprint", async () => {
+    await withGoldenCopy(async (dir) => {
+      let message = "The file cannot be read (EACCES).";
+      const readFileHook: OpenOptions["readFile"] = async (path, file) =>
+        file === "glossary.json"
+          ? { status: "failed", issue: makeIssue("unreadable-file", file, null, message) }
+          : readLibraryFileBytes(path, file);
+      const library = await open(dir, undefined, { ...settled, readFile: readFileHook });
+      const first = await snap(library);
+      expect(first.files.get("glossary.json")?.issues.map((issue) => issue.message)).toEqual([
+        message,
+      ]);
+      message = "The path is not a regular file.";
+      const second = await snap(library);
+      expect(second).not.toBe(first);
+      expect(second.files.get("glossary.json")?.issues.map((issue) => issue.message)).toEqual([
+        message,
+      ]);
+      await expectMatchesRebuild(library, dir, { ...settled, readFile: readFileHook });
+    });
+  });
+
+  it("returns a new snapshot when a file that is too large has grown", async () => {
+    await withGoldenCopy(async (dir) => {
+      const file = pathOf(dir, "glossary.json");
+      const before = await stat(file, { bigint: true });
+      await writeFile(file, "x".repeat(Number(before.size) + 10), "utf8");
+      const after = await stat(file, { bigint: true });
+      expect(after.size).not.toBe(before.size);
+      let stats = before;
+      const readFileHook: OpenOptions["readFile"] = async (path, relative) =>
+        relative === "glossary.json"
+          ? {
+              status: "failed",
+              stats,
+              issue: makeIssue("file-too-large", relative, null, "Too large."),
+            }
+          : readLibraryFileBytes(path, relative);
+      const library = await open(dir, undefined, { ...settled, readFile: readFileHook });
+      const first = await snap(library);
+      const oldPrint = first.files.get("glossary.json")?.fingerprint;
+      expect(oldPrint).toBeTruthy();
+      stats = after;
+      const second = await snap(library);
+      expect(second).not.toBe(first);
+      const newPrint = second.files.get("glossary.json")?.fingerprint;
+      expect(newPrint).toBeTruthy();
+      expect(newPrint).not.toEqual(oldPrint);
+      await expectMatchesRebuild(library, dir, { ...settled, readFile: readFileHook });
+    });
+  });
+
   it("returns the same snapshot when an unsettled file is still too large", async () => {
     await withGoldenCopy(async (dir) => {
       const file = pathOf(dir, "glossary.json");
