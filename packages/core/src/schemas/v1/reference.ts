@@ -39,6 +39,8 @@ const MEDIA_TYPES = [...IMAGE_TYPES, "video/mp4", "video/webm"] as const;
 const REGION_TOLERANCE = 1e-9;
 
 const MEDIA_ID = /^m[1-9]\d*$/;
+const PIN_ID = /^p[1-9]\d*$/;
+const PIECE_ID = /^p(0|[1-9]\d*)$/;
 const MEDIA_PATH =
   /^ref-\d{8}-[0-9a-hjkmnp-tv-z]{6}\/m[1-9]\d*(-t(0|[1-9]\d*))?\.(webp|png|jpg|avif|mp4|webm)$/;
 
@@ -87,6 +89,7 @@ const Media = z
     if (!isVideo && media.frames.length > 0) {
       addRuleIssue(ctx, ["frames"], 'must be empty unless kind is "video".');
     }
+    if (!isVideo) return; // frames of an image are reported once, as a whole
     const firstAt = new Map<number, number>();
     media.frames.forEach((frame, index) => {
       const first = firstAt.get(frame.timeMs);
@@ -95,7 +98,7 @@ const Media = z
       } else {
         firstAt.set(frame.timeMs, index);
       }
-      if (isVideo && media.durationMs !== null && frame.timeMs > media.durationMs) {
+      if (media.durationMs !== null && frame.timeMs > media.durationMs) {
         addRuleIssue(
           ctx,
           ["frames", index, "timeMs"],
@@ -199,11 +202,11 @@ type ReferenceValue = z.output<typeof ReferenceSchema>;
 function checkMedia(reference: ReferenceValue, ctx: z.RefinementCtx): void {
   const seen = new Set<string>();
   reference.media.forEach((media, index) => {
-    if (seen.has(media.id))
+    if (MEDIA_ID.test(media.id) && seen.has(media.id))
       addRuleIssue(
         ctx,
         ["media", index, "id"],
-        `"${media.id}" is used by more than one media item.`,
+        `${JSON.stringify(media.id)} is used by more than one media item.`,
         "duplicate-id",
       );
     seen.add(media.id);
@@ -219,6 +222,7 @@ function checkMedia(reference: ReferenceValue, ctx: z.RefinementCtx): void {
         `must be "${expected}" (<reference id>/<media id>.<extension of the type>).`,
       );
     }
+    if (media.kind !== "video") return;
     media.frames.forEach((frame, frameIndex) => {
       const expectedFrame = `${reference.id}/${media.id}-t${frame.timeMs}.${EXTENSION[frame.type]}`;
       if (
@@ -243,23 +247,26 @@ function checkPins(reference: ReferenceValue, ctx: z.RefinementCtx): void {
 
   const seen = new Set<string>();
   reference.pins.forEach((pin, index) => {
-    if (seen.has(pin.id))
+    if (PIN_ID.test(pin.id) && seen.has(pin.id))
       addRuleIssue(
         ctx,
         ["pins", index, "id"],
-        `"${pin.id}" is used by more than one pin.`,
+        `${JSON.stringify(pin.id)} is used by more than one pin.`,
         "duplicate-id",
       );
     seen.add(pin.id);
 
+    if (!MEDIA_ID.test(pin.mediaId)) return;
     const media = mediaById.get(pin.mediaId);
     if (media === undefined) {
       addRuleIssue(
         ctx,
         ["pins", index, "mediaId"],
-        `"${pin.mediaId}" is not a media item of this reference.`,
+        `${JSON.stringify(pin.mediaId)} is not a media item of this reference.`,
         "broken-local-link",
       );
+    } else if (pin.frameMs !== null && !(Number.isInteger(pin.frameMs) && pin.frameMs >= 0)) {
+      // reported by its own bound
     } else if (media.kind === "video") {
       if (pin.frameMs === null || !media.frames.some((frame) => frame.timeMs === pin.frameMs)) {
         addRuleIssue(
@@ -283,11 +290,11 @@ function checkPins(reference: ReferenceValue, ctx: z.RefinementCtx): void {
 function checkInterpretations(reference: ReferenceValue, ctx: z.RefinementCtx): void {
   const pieces = new Set(["p0", ...reference.pins.map((pin) => pin.id)]);
   for (const key of Object.keys(reference.interpretations)) {
-    if (!pieces.has(key)) {
+    if (PIECE_ID.test(key) && !pieces.has(key)) {
       addRuleIssue(
         ctx,
         ["interpretations", key],
-        `"${key}" is not p0 or a pin of this reference.`,
+        `${JSON.stringify(key)} is not p0 or a pin of this reference.`,
         "broken-local-link",
       );
     }

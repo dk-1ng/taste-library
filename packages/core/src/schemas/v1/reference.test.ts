@@ -763,13 +763,45 @@ describe("reference: pins", () => {
     expect(broken((r) => (r.pins[0].note = ""))).toEqual([]);
   });
 
-  it("reports one issue per rule broken", () => {
+  it("reports each rule once; a type error hides the rules across fields", () => {
     const found = broken((r) => {
       r.pins[0].mediaId = "m9";
       r.pins[0].region.w = 0;
       r.pins[0].polarity = "x";
     });
     expect(found.map((f) => f.pointer).sort()).toEqual(["/pins/0/polarity", "/pins/0/region/w"]);
+  });
+
+  it("reports a malformed value once, by its own rule", () => {
+    expectOne(
+      broken((r) => (r.pins[0].mediaId = "x1")),
+      "schema-violation",
+      "/pins/0/mediaId",
+    );
+    expectOne(
+      broken((r) => (r.pins[0].frameMs = -1)),
+      "schema-violation",
+      "/pins/0/frameMs",
+    );
+    expectOne(
+      broken((r) => r.pins.push({ ...r.pins[0], id: "x" })),
+      "schema-violation",
+      "/pins/1/id",
+    );
+    expectOne(
+      broken((r) => {
+        r.media.push({ ...r.media[0], id: "x" });
+      }),
+      "schema-violation",
+      "/media/1/id",
+    );
+  });
+
+  it("does not put control characters from the data into a message", () => {
+    const found = broken((r) => (r.pins[0].mediaId = "\u001b]0;x\u0007"));
+    expect(found.every((f) => !f.message.includes("\u001b"))).toBe(true);
+    const link = broken((r) => (r.interpretations["p9"] = structuredClone(r.interpretations.p0)));
+    expect(link[0]?.message).toContain('"p9"');
   });
 });
 
@@ -797,7 +829,12 @@ describe("reference: interpretations", () => {
       configurable: true,
       writable: true,
     });
-    expect(validate(r)).not.toEqual([]);
+    const found = validate(r);
+    expect(found).toHaveLength(1);
+    expect(found[0]).toMatchObject({
+      code: "schema-violation",
+      pointer: "/interpretations/__proto__",
+    });
   });
 
   it("inputSha256 is not null in a piece interpretation", () => {
@@ -930,5 +967,30 @@ describe("reference: lastIssued", () => {
       "schema-violation",
       "/lastIssued/pin",
     );
+  });
+});
+
+describe("reference: order is not an error", () => {
+  it("accepts media, pins, frames and interpretation keys out of order", () => {
+    const r = example();
+    const m2 = video();
+    m2.frames.reverse();
+    r.media = [m2, ...r.media];
+    r.pins = [
+      { ...r.pins[0], id: "p10" },
+      { ...r.pins[0], id: "p2" },
+      { ...r.pins[0], id: "p1" },
+    ];
+    const p0 = r.interpretations.p0;
+    r.interpretations = { p10: structuredClone(p0), p2: structuredClone(p0), p0 };
+    r.lastIssued = { media: 2, pin: 10 };
+    expect(validate(r)).toEqual([]);
+  });
+});
+
+describe("reference: frames of an image", () => {
+  it("are reported once, as a whole", () => {
+    const found = broken((r) => (r.media[0].frames = [...video().frames, ...video().frames]));
+    expectOne(found, "schema-violation", "/media/0/frames");
   });
 });

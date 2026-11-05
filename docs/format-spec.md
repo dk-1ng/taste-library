@@ -1,6 +1,6 @@
 # Library format specification
 
-**Status: v1, frozen on 2026-11-04.** `formatVersion` is `1`. Any change to what this document describes is a new format version with a migration (§15); this document is then updated to describe the new version, and the change is recorded in [design.md](design.md) §18.
+**Status: v1, frozen on 2026-11-04.** `formatVersion` is `1`. Any change to what this document describes is a new format version with a migration (§15; one exception, recorded in §15.1); this document is then updated to describe the new version, and the change is recorded in [design.md](design.md) §18.
 
 This is the public contract for a taste-library library on disk. The tool, agents and third-party integrations follow it. Behavior that is not about the data format lives in [design.md](design.md). The executable form of this specification is the zod schemas in `packages/core`; where they disagree, this document is right and the code has a bug.
 

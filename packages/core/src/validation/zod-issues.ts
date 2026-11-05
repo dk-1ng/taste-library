@@ -46,6 +46,7 @@ const TYPE_NAMES: Record<string, string> = {
   boolean: "a boolean",
   object: "an object",
   array: "an array",
+  record: "an object",
   null: "null",
 };
 
@@ -125,4 +126,10 @@ export function issuesFromZod(error: z.ZodError, file: string): Issue[] {
     }
   }
   return out;
+}
+
+/** Parses a value with a schema and returns its issues (empty when it is valid). Always reports the input, so messages are right. */
+export function validateValue(schema: z.ZodType, value: unknown, file: string): Issue[] {
+  const result = schema.safeParse(value, { reportInput: true });
+  return result.success ? [] : issuesFromZod(result.error, file);
 }
