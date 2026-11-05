@@ -20,7 +20,7 @@ The issue number and the branch name.
 1. Gather: `gh issue view <N>`, `git diff main...HEAD`, `git log main..HEAD --format='%H%n%B'`.
 2. **Run the checks yourself** (the project check command, plus the CI policy checks if relevant). Do not trust earlier reports.
 3. Check, in this order:
-   1. **Correctness:** bugs, edge cases, error handling, Windows and Linux behavior.
+   1. **Correctness:** bugs, edge cases, error handling, Windows, Linux and macOS behavior.
    2. **Acceptance criteria:** every one is met and verified.
    3. **Design conformance:** matches `docs/design.md` and `docs/format-spec.md`; behavior changes update them in this branch.
    4. **Hard rules:** no third-party media, nothing personal (names, real projects, machine paths), intent-only filtering, user's words unchanged, no telemetry or remote code, writes through `tastelib`, licenses, portability.

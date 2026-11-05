@@ -1,5 +1,5 @@
 #!/bin/sh
-# Tests .githooks/pre-push in a throwaway repository. POSIX sh; runs on Linux and Windows (Git's sh).
+# Tests .githooks/pre-push in a throwaway repository. POSIX sh; runs on Linux, Windows and macOS (Git's sh).
 set -eu
 
 hook="$(cd "$(dirname "$0")/../.." && pwd)/.githooks/pre-push"

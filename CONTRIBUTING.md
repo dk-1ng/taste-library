@@ -19,7 +19,7 @@ These are non-negotiable. `CLAUDE.md` holds the full wording.
 5. Local and private: no telemetry, no remote code, no account, works offline.
 6. Agents write library data only through `tastelib`.
 7. Original code, or dependencies under permissive licenses.
-8. Portable: Linux and Windows, including non-ASCII paths.
+8. Portable: Linux, Windows and macOS, including non-ASCII paths.
 
 ## Workflow
 
@@ -97,7 +97,7 @@ pnpm format      # rewrites files to the Biome format
 
 The code lives in `packages/` (`core`, `server`, `web`, `cli`, `mcp`), one workspace package each. Each package compiles `src/` to `dist/` with `tsc -b`; the shared compiler options are in `tsconfig.base.json`.
 
-When you add a dependency, pnpm records the exact version (no `^` ranges) and the lockfile is committed. Shared development tools go in the root `package.json`; a package declares only what it needs at run time. Scripts in any `package.json` must run unchanged on Linux and Windows: no shell built-ins such as `rm` or `cp`, and no inline environment variables. `pnpm check` is the gate CI will run (wired in a later M0 issue); see `docs/design.md` §3.
+When you add a dependency, pnpm records the exact version (no `^` ranges) and the lockfile is committed. Shared development tools go in the root `package.json`; a package declares only what it needs at run time. Scripts in any `package.json` must run unchanged on Linux, Windows and macOS: no shell built-ins such as `rm` or `cp`, and no inline environment variables. `pnpm check` is the gate CI will run (wired in a later M0 issue); see `docs/design.md` §3.
 
 Maintainer workflow helpers live in `scripts/` (plain Node, no dependencies, plus the GitHub CLI): `node scripts/loop.mjs status` shows what the per-issue loop should do next. Their tests run with `pnpm test:scripts`.
 
@@ -111,7 +111,7 @@ Enforced by `pnpm check`: Biome lint and format, strict TypeScript. In addition:
 | --- | --- |
 | type | `type: feature`, `type: bug`, `type: chore`, `type: docs`, `type: spike`, `type: checkpoint` |
 | area | `area: core`, `area: server`, `area: web`, `area: cli`, `area: mcp`, `area: agent-kit` |
-| platform | `platform: windows`, `platform: linux` |
+| platform | `platform: windows`, `platform: linux`, `platform: macos` |
 | status | `status: triage`, `status: ready`, `status: in progress`, `status: blocked` |
 | complexity | `complexity: high` |
 
