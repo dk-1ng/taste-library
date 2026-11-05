@@ -7,6 +7,7 @@ import {
   type FormatRegistry,
   type LibraryFileKind,
 } from "../format.js";
+import type { Plan, Skipped } from "../changes/plan.js";
 import { canonicalize, serialize } from "../json/canonical.js";
 import { differsBesidesUpdatedAt, stampFile } from "../model/timestamps.js";
 import { Slug } from "../schemas/v1/shared.js";
@@ -24,23 +25,6 @@ import { type IoFailure, replaceFile, type WriteOptions } from "./replace-file.j
  * canonicalized, stamped and serialized before anything touches the disk, and a refusal leaves
  * every file as it was.
  */
-
-/** A change to one library file: `path` relative to the library with `/`, and the new value. */
-export interface FileChange {
-  path: string;
-  next: unknown;
-}
-
-export interface Skipped {
-  path: string;
-  reason: "invalid" | "unreadable" | "newer";
-}
-
-/** What an operation wants written; built from the gated snapshot. */
-export interface Plan {
-  changes: FileChange[];
-  skipped: Skipped[];
-}
 
 /** Something that happened beyond the plan; the migration runner (#38) adds the `migrated` notice. */
 export type Notice = { code: "migrated"; from: number; to: number };

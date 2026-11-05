@@ -36,12 +36,9 @@ export {
 } from "./node/replace-file.js";
 export {
   type Build,
-  type FileChange,
   kindOfPath,
   type LibraryWriteOptions,
   type Notice,
-  type Plan,
-  type Skipped,
   type WriteFailure,
   type WriteResult,
 } from "./node/write.js";
