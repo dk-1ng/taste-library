@@ -2,6 +2,14 @@
 
 export type { FileChange, Plan, SkipReason, Skipped } from "./changes/plan.js";
 export { skipReasonOf } from "./changes/plan.js";
+export type { PieceMatcher } from "./changes/remove-links.js";
+export {
+  pieceMatcher,
+  withoutDirectionLink,
+  withoutFamilyLink,
+  withoutGuardrailLink,
+  withoutPieceLinks,
+} from "./changes/remove-links.js";
 export type {
   EntryClass,
   FormatLayout,
