@@ -1,4 +1,5 @@
 import type { z } from "zod";
+import { roundRegion } from "../model/region.js";
 import { DirectionsSchema } from "../schemas/v1/directions.js";
 import { FamilySchema } from "../schemas/v1/family.js";
 import { GlossarySchema } from "../schemas/v1/glossary.js";
@@ -9,6 +10,8 @@ import { ProjectSchema } from "../schemas/v1/project.js";
 import { ReferenceSchema } from "../schemas/v1/reference.js";
 import { sequenceNumber } from "../schemas/v1/shared.js";
 import { TasteProfileSchema } from "../schemas/v1/taste-profile.js";
+import { type Issue, makeIssue } from "../validation/issue.js";
+import type { ReadOk } from "./read.js";
 
 /**
  * The canonical form of a library file (format-spec §3.3; docs/design.md section 4, "Writing
@@ -19,8 +22,6 @@ import { TasteProfileSchema } from "../schemas/v1/taste-profile.js";
  */
 
 type Loose = Record<string, unknown>;
-
-const MILLIONTHS = 1_000_000;
 
 /** Code-unit order: the same on every computer, unlike `localeCompare`. */
 function compareText(a: string, b: string): number {
@@ -46,30 +47,6 @@ function targetOrder(a: { target: string }, b: { target: string }): number {
   const [refA = "", pieceA = "p0"] = a.target.split("#");
   const [refB = "", pieceB = "p0"] = b.target.split("#");
   return compareText(refA, refB) || sequenceNumber(pieceA) - sequenceNumber(pieceB);
-}
-
-/**
- * One axis of a region, in integer millionths (design.md section 4, "Proportions"): the size is
- * at least 1e-6, the position at most 1 − 1e-6, and the size is clamped to `1 − position`, so
- * `position + size ≤ 1` holds whatever the rounding does.
- */
-export function roundAxis(position: number, size: number): { position: number; size: number } {
-  const p = Math.min(Math.round(position * MILLIONTHS), MILLIONTHS - 1);
-  let s = Math.max(Math.round(size * MILLIONTHS), 1);
-  if (p + s > MILLIONTHS) s = MILLIONTHS - p;
-  return { position: p / MILLIONTHS, size: s / MILLIONTHS };
-}
-
-/** Rounds a region that passed validation to at most 6 decimals, keeping it valid. */
-export function roundRegion(region: { x: number; y: number; w: number; h: number }): {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-} {
-  const horizontal = roundAxis(region.x, region.w);
-  const vertical = roundAxis(region.y, region.h);
-  return { x: horizontal.position, y: vertical.position, w: horizontal.size, h: vertical.size };
 }
 
 /** The key order of a frame, which the media schema reads as `unknown` and so cannot order. */
@@ -169,4 +146,31 @@ export function serialize<K extends FileType>(type: K, value: unknown): string {
 export function isCanonical(type: FileType, value: unknown, bytes: Uint8Array): boolean {
   const expected = new TextEncoder().encode(serialize(type, value));
   return expected.length === bytes.length && expected.every((byte, index) => byte === bytes[index]);
+}
+
+/**
+ * The `not-canonical` warning for a file that read and validated but whose bytes are not the
+ * canonical form of its value, or `null` when they are (format-spec §3.3, §16.2). The message
+ * names a BOM or CRLF when the reader saw one.
+ */
+export function canonicalIssue(
+  type: FileType,
+  file: string,
+  bytes: Uint8Array,
+  read: ReadOk,
+): Issue | null {
+  if (isCanonical(type, read.value, bytes)) return null;
+  const causes: string[] = [];
+  if (read.hadBom) causes.push("a byte order mark");
+  if (read.hadCr) causes.push("CRLF line endings");
+  const why =
+    causes.length > 0
+      ? `has ${causes.join(" and ")}`
+      : "differs from the canonical form in layout, key or list order, escapes or numbers";
+  return makeIssue(
+    "not-canonical",
+    file,
+    null,
+    `The file ${why}; the next write rewrites it in canonical form.`,
+  );
 }

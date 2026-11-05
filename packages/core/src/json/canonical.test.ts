@@ -1,7 +1,9 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { readLibraryJson } from "../json/read.js";
-import { canonicalize, isCanonical, roundAxis, roundRegion, serialize } from "./canonical.js";
+import { roundAxis, roundRegion } from "../model/region.js";
+import { ReferenceSchema } from "../schemas/v1/reference.js";
+import { canonicalIssue, canonicalize, isCanonical, serialize } from "./canonical.js";
+import { readLibraryJson } from "./read.js";
 
 const enc = (text: string): Uint8Array => new TextEncoder().encode(text);
 
@@ -393,67 +395,206 @@ describe("rounding of proportions", () => {
   });
 });
 
-describe("isCanonical: every not-canonical cause of format-spec §3.3", () => {
+/** Bytes → reader → schema → the not-canonical verdict, the path a validated file takes. */
+function verdict(text: string | Uint8Array, type: "reference" = "reference") {
+  const bytes = typeof text === "string" ? enc(text) : text;
+  const read = readLibraryJson(bytes, "references/r.json");
+  if (!read.ok) throw new Error("the file must read");
+  expect(ReferenceSchema.safeParse(read.value).success).toBe(true);
+  return { read, issue: canonicalIssue(type, "references/r.json", bytes, read) };
+}
+
+describe("not-canonical: every cause of format-spec §3.3", () => {
   const value = reference();
   const canonical = serialize("reference", value);
-  const check = (text: string | Uint8Array) =>
-    isCanonical("reference", value, typeof text === "string" ? enc(text) : text);
+  const layout = (v: unknown, space: number) => `${JSON.stringify(v, null, space)}\n`;
 
   it("accepts the canonical bytes", () => {
-    expect(check(canonical)).toBe(true);
+    expect(verdict(canonical).issue).toBeNull();
   });
 
-  it("detects a byte order mark", () => {
-    expect(check(`﻿${canonical}`)).toBe(false);
+  it("reports a byte order mark", () => {
+    const { read, issue } = verdict(`﻿${canonical}`);
+    expect(read.ok && read.hadBom).toBe(true);
+    expect(issue).toMatchObject({ code: "not-canonical", severity: "warning" });
+    expect(issue?.message).toContain("byte order mark");
   });
 
-  it("detects CRLF line endings", () => {
-    expect(check(canonical.replaceAll("\n", "\r\n"))).toBe(false);
+  it("reports CRLF line endings", () => {
+    const { read, issue } = verdict(canonical.replaceAll("\n", "\r\n"));
+    expect(read.ok && read.hadCr).toBe(true);
+    expect(issue?.code).toBe("not-canonical");
+    expect(issue?.message).toContain("CRLF");
   });
 
-  it("detects a missing or a doubled final LF", () => {
-    expect(check(canonical.slice(0, -1))).toBe(false);
-    expect(check(`${canonical}\n`)).toBe(false);
+  it("reports a missing or a doubled final LF", () => {
+    expect(verdict(canonical.slice(0, -1)).issue?.code).toBe("not-canonical");
+    expect(verdict(`${canonical}\n`).issue?.code).toBe("not-canonical");
   });
 
-  it("detects other whitespace and indentation", () => {
-    expect(check(JSON.stringify(value))).toBe(false);
-    expect(check(`${JSON.stringify(canonicalize("reference", value), null, 4)}\n`)).toBe(false);
+  it("reports other whitespace and indentation", () => {
+    const canonicalValue = canonicalize("reference", value);
+    expect(verdict(JSON.stringify(value)).issue?.code).toBe("not-canonical");
+    expect(verdict(layout(canonicalValue, 4)).issue?.code).toBe("not-canonical");
   });
 
-  it("detects keys out of order", () => {
-    expect(check(`${JSON.stringify(scramble(canonicalize("reference", value)), null, 2)}\n`)).toBe(
-      false,
-    );
+  it("reports keys out of order", () => {
+    const text = layout(scramble(canonicalize("reference", value)), 2);
+    expect(verdict(text).issue?.code).toBe("not-canonical");
   });
 
-  it("detects list entries out of order", () => {
+  it("reports list entries out of order", () => {
     const shuffled = canonicalize("reference", value) as Loose;
     shuffled.pins = [...shuffled.pins].reverse();
-    expect(check(`${JSON.stringify(shuffled, null, 2)}\n`)).toBe(false);
+    expect(verdict(layout(shuffled, 2)).issue?.code).toBe("not-canonical");
   });
 
-  it("detects needless \\u escapes", () => {
-    expect(check(canonical.replace("Usuário", "Usu\\u00e1rio"))).toBe(false);
-  });
-
-  it("detects a number written as 1.0 or with more than 6 decimals", () => {
-    const withRegion = canonical.replace('"x": 0.1,', '"x": 0.10,');
-    expect(withRegion).not.toBe(canonical);
-    expect(check(withRegion)).toBe(false);
-    expect(check(canonical.replace('"x": 0.1,', '"x": 0.1000001,'))).toBe(false);
-    expect(check(canonical.replace('"formatVersion": 1,', '"formatVersion": 1.0,'))).toBe(false);
-  });
-
-  it("detects a region that is valid but not rounded", () => {
-    const unrounded = reference();
-    unrounded.pins[0].region.x = 0.1234565;
-    unrounded.pins[0].region.w = 0.8765435;
-    const text = `${JSON.stringify(canonicalize("reference", reference()), null, 2)}\n`.replace(
-      '"x": 0.1,',
-      '"x": 0.1234565,',
+  it("reports needless \\u escapes", () => {
+    expect(verdict(canonical.replace("Usuário", "Usu\\u00e1rio")).issue?.code).toBe(
+      "not-canonical",
     );
-    expect(isCanonical("reference", unrounded, enc(text))).toBe(false);
-    expect(isCanonical("reference", unrounded, enc(serialize("reference", unrounded)))).toBe(true);
   });
+
+  it("reports a number written as 1.0", () => {
+    const text = canonical.replace('"formatVersion": 1,', '"formatVersion": 1.0,');
+    expect(text).not.toBe(canonical);
+    expect(verdict(text).issue?.code).toBe("not-canonical");
+  });
+
+  it("reports a region with more than 6 decimals, and the rewrite is canonical", () => {
+    const precise = reference();
+    precise.pins[0].region = { x: 0.1234565, y: 0.1, w: 0.8765435, h: 0.5 };
+    // Everything canonical except the region, which is written as it was given.
+    const text = serialize("reference", reference()).replace(
+      /"region": \{[^}]*\}/,
+      `"region": ${JSON.stringify(precise.pins[0].region, null, 2).replaceAll("\n", "\n      ")}`,
+    );
+    const { issue } = verdict(text);
+    expect(issue?.code).toBe("not-canonical");
+    const rewritten = serialize("reference", precise);
+    expect(rewritten).toContain('"x": 0.123457');
+    expect(verdict(rewritten).issue).toBeNull();
+  });
+
+  it("is false for bytes of another value", () => {
+    expect(isCanonical("reference", value, enc(serialize("reference", video())))).toBe(false);
+  });
+});
+
+describe("serialize: key order of every file type, agent forms included", () => {
+  const agent = (proposal: unknown) => ({
+    origin: "agent",
+    proposedBy: "claude-code",
+    proposedAt: T1,
+    inputSha256: null,
+    proposal,
+    status: "corrected",
+    correction: proposal,
+    reviewedAt: T2,
+  });
+  const files: [Parameters<typeof serialize>[0], Loose][] = [
+    [
+      "family",
+      {
+        formatVersion: 1,
+        slug: "quiet",
+        createdAt: T1,
+        updatedAt: T2,
+        description: agent({ name: "Quiet", meaning: "m", vocabulary: ["a"] }),
+        members: [
+          {
+            target: "ref-20261104-k3x9ab#p0",
+            origin: "agent",
+            proposedBy: "claude-code",
+            proposedAt: T1,
+            status: "accepted",
+            reviewedAt: T2,
+          },
+          { target: "ref-20261104-k3x9ab#p1", origin: "user", addedAt: T1 },
+        ],
+      },
+    ],
+    [
+      "glossary",
+      {
+        formatVersion: 1,
+        terms: [
+          {
+            id: "term-aaaaaa",
+            createdAt: T1,
+            updatedAt: T1,
+            pieces: ["ref-20261104-k3x9ab#p0"],
+            entry: agent({ term: "t", definition: "d" }),
+          },
+        ],
+      },
+    ],
+    [
+      "guardrails",
+      {
+        formatVersion: 1,
+        guardrails: [
+          {
+            id: "gr-aaaaaa",
+            createdAt: T1,
+            updatedAt: T1,
+            sources: [],
+            rule: agent({ text: "r" }),
+          },
+        ],
+      },
+    ],
+    [
+      "taste-profile",
+      {
+        formatVersion: 1,
+        statements: [
+          {
+            id: "st-aaaaaa",
+            createdAt: T1,
+            updatedAt: T1,
+            evidence: [],
+            statement: agent({ kind: "like", text: "t" }),
+          },
+        ],
+      },
+    ],
+    [
+      "project",
+      {
+        formatVersion: 1,
+        slug: "site",
+        createdAt: T1,
+        updatedAt: T1,
+        name: "Site",
+        intent: agent({ what: "w", forWhom: "f", userTasks: ["a"], why: "y" }),
+        discarded: [{ text: "z", category: "color" }],
+      },
+    ],
+    [
+      "directions",
+      {
+        formatVersion: 1,
+        directions: [
+          {
+            id: "d1",
+            createdAt: T1,
+            updatedAt: T1,
+            family: null,
+            pieces: [],
+            guardrails: [],
+            plan: agent({ title: "t", why: "w" }),
+          },
+        ],
+        lastIssued: { direction: 1 },
+      },
+    ],
+  ];
+  for (const [type, value] of files) {
+    it(`gives the same bytes for ${type} in any key order`, () => {
+      const text = serialize(type, value);
+      expect(serialize(type, scramble(value))).toBe(text);
+      expect(serialize(type, JSON.parse(text))).toBe(text);
+    });
+  }
 });
