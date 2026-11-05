@@ -1,6 +1,10 @@
 {
   "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
-  "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true
+  },
   "files": {
     "includes": ["**/*.ts", "**/*.tsx", "**/*.js", "**/*.mjs", "**/*.json", "!pnpm-lock.yaml"]
   },
@@ -11,6 +15,69 @@
     "lineWidth": 100,
     "lineEnding": "lf"
   },
-  "linter": { "enabled": true, "rules": { "preset": "recommended" } },
-  "javascript": { "formatter": { "quoteStyle": "double", "semicolons": "always" } }
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "preset": "recommended"
+    }
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "double",
+      "semicolons": "always"
+    }
+  },
+  "overrides": [
+    {
+      "includes": [
+        "packages/core/src/**",
+        "!packages/core/src/node/**",
+        "!packages/core/src/index.ts",
+        "!packages/core/src/**/*.test.ts"
+      ],
+      "linter": {
+        "rules": {
+          "correctness": {
+            "noNodejsModules": "error"
+          },
+          "style": {
+            "noRestrictedGlobals": {
+              "level": "error",
+              "options": {
+                "deniedGlobals": {
+                  "process": "process is not available in pure modules (they also run in a browser); keep it under node/.",
+                  "Buffer": "Buffer is not available in pure modules (they also run in a browser); keep it under node/.",
+                  "setImmediate": "setImmediate is not available in pure modules (they also run in a browser); keep it under node/.",
+                  "clearImmediate": "clearImmediate is not available in pure modules (they also run in a browser); keep it under node/.",
+                  "require": "require is not available in pure modules (they also run in a browser); keep it under node/.",
+                  "module": "module is not available in pure modules (they also run in a browser); keep it under node/.",
+                  "__dirname": "__dirname is not available in pure modules (they also run in a browser); keep it under node/.",
+                  "__filename": "__filename is not available in pure modules (they also run in a browser); keep it under node/.",
+                  "globalThis": "globalThis is not available in pure modules (they also run in a browser); keep it under node/.",
+                  "global": "global is not available in pure modules (they also run in a browser); keep it under node/.",
+                  "self": "self is not available in pure modules (they also run in a browser); keep it under node/.",
+                  "window": "window is not available in pure modules (they also run in a browser); keep it under node/."
+                }
+              }
+            },
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["**", "!zod", "!./**", "!../**"],
+                    "message": "Pure modules import only zod and relative pure modules."
+                  },
+                  {
+                    "group": ["**/node/**", "**/test/**", "**/index.js", "**/browser.js"],
+                    "message": "Pure modules never import node/, test code or an entry."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
 }

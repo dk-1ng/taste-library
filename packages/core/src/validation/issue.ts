@@ -22,6 +22,16 @@ export const ISSUE_SEVERITY = {
   "proposal-stale": "warning",
   "duplicate-term": "warning",
   "media-mismatch": "warning",
+  "orphan-media": "warning",
+  "media-marker-missing": "warning",
+  "unexpected-file": "warning",
+  "leftover-temp-file": "warning",
+  "needs-migration": "info",
+  "awaiting-sync": "info",
+  "media-not-checked": "info",
+  // Only a write can produce these two (format-spec §16.2, "Write refusals").
+  "write-conflict": "error",
+  "not-allowed": "error",
 } as const satisfies Record<string, Severity>;
 
 export type IssueCode = keyof typeof ISSUE_SEVERITY;

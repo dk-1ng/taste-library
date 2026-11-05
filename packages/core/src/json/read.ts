@@ -181,7 +181,9 @@ export function readLibraryJson(bytes: Uint8Array, file: string): ReadResult {
     const pointer = `${frame.pointer}/${escapePointerToken(key)}`;
     checkSurrogates(key, pointer);
     if (frame.keys?.has(key)) {
-      issues.push(makeIssue("duplicate-key", file, pointer, `The key "${key}" appears twice.`));
+      issues.push(
+        makeIssue("duplicate-key", file, pointer, `The key ${JSON.stringify(key)} appears twice.`),
+      );
     }
     frame.keys?.add(key);
     skipWhitespace();

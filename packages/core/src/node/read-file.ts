@@ -11,11 +11,6 @@ export type FileBytes =
   | { status: "missing" }
   | { status: "failed"; issue: Issue };
 
-function errorCode(error: unknown): string {
-  const code = (error as { code?: unknown } | null)?.code;
-  return typeof code === "string" ? code : "unknown error";
-}
-
 /**
  * Reads a library file through one handle: the size check and the read share it, so a symbolic
  * link or a change in between cannot get past the limit. `file` is the path relative to the
@@ -42,29 +37,33 @@ export async function readLibraryFileBytes(path: string, file: string): Promise<
         };
       }
       if (info.size > MAX_JSON_BYTES) return tooLarge();
-      // One byte more than the file had, so a file that grew meanwhile is noticed.
-      const buffer = Buffer.alloc(Math.min(info.size + 1, MAX_JSON_BYTES + 1));
+      // Read until the end of the file, never past the limit plus one byte, so a file that grew
+      // after the size check is read whole (or reported too large), never returned as a prefix.
+      let buffer = Buffer.alloc(Math.min(info.size + 1, MAX_JSON_BYTES + 1));
       let length = 0;
-      while (length < buffer.length) {
+      while (true) {
+        if (length === buffer.length) {
+          if (buffer.length > MAX_JSON_BYTES) return tooLarge();
+          const larger = Buffer.alloc(Math.min(buffer.length * 2, MAX_JSON_BYTES + 1));
+          buffer.copy(larger, 0, 0, length);
+          buffer = larger;
+        }
         const { bytesRead } = await handle.read(buffer, length, buffer.length - length, length);
         if (bytesRead === 0) break;
         length += bytesRead;
       }
-      if (length > MAX_JSON_BYTES) return tooLarge();
       return { status: "ok", bytes: new Uint8Array(buffer.buffer, buffer.byteOffset, length) };
     } finally {
       await handle.close();
     }
   } catch (error) {
-    if (errorCode(error) === "ENOENT") return { status: "missing" };
+    const code = (error as { code?: unknown } | null)?.code;
+    // An error without an errno code is a bug, not an unreadable file: fail loudly.
+    if (typeof code !== "string") throw error;
+    if (code === "ENOENT") return { status: "missing" };
     return {
       status: "failed",
-      issue: makeIssue(
-        "unreadable-file",
-        file,
-        null,
-        `The file cannot be read (${errorCode(error)}).`,
-      ),
+      issue: makeIssue("unreadable-file", file, null, `The file cannot be read (${code}).`),
     };
   }
 }

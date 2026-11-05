@@ -12,6 +12,6 @@ export {
   readConfig,
   resolveConfigPath,
   writeConfig,
-} from "./config.js";
+} from "./node/config.js";
 export type { FileBytes } from "./node/read-file.js";
 export { MAX_JSON_BYTES, readLibraryFileBytes } from "./node/read-file.js";
