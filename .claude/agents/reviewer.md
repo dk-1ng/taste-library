@@ -20,7 +20,7 @@ You are **read-only**. Never edit files, commit, push, or change labels, issues 
 
 1. Gather: `gh issue view <N> --comments`, `git log main..HEAD --format='%H%n%B'`, and the diff:
    - round 1: `git diff main...HEAD`;
-   - re-review: `git diff <last reviewed commit>..HEAD`, plus `git diff main...HEAD` only to read context.
+   - re-review: `git range-diff main..<last reviewed commit> main..HEAD`, which shows only what the branch's own commits changed since then, even when `main` was merged in (a plain `git diff <last reviewed commit>..HEAD` would also show other PRs' code). Use `git diff main...HEAD` only to read context.
 2. **Run the checks yourself** (`pnpm check`, plus the CI policy checks if relevant). Do not trust earlier reports.
 3. Check, in this order:
    1. **Correctness:** bugs, edge cases, error handling, Windows, Linux and macOS behavior.
@@ -52,7 +52,7 @@ Grade every finding. Grade honestly: the merge depends on it, so never inflate a
   - a redundant second issue, or wording that could be clearer;
   - missing tests for further edge cases;
   - doc nits;
-  - problems in code this branch did not change (also tag `pre-existing`).
+  - problems in code this branch did not change (also tag `pre-existing`), unless the branch's new behavior depends on that code; then grade it as if the branch had written it.
 
 A finding whose fix would need a new mechanism, a new rule or promise in `docs/design.md` or `docs/format-spec.md`, or a redesign is flagged **`needs design decision`**, whatever its severity. That is a decision for the maintainer, not a review fix.
 
