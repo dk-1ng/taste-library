@@ -19,6 +19,17 @@ describe("readLibraryFileBytes", () => {
     });
   });
 
+  it("returns the stat of the handle it read, with bigint times", async () => {
+    await withTempDir(async (dir) => {
+      await writeFile(join(dir, "a.json"), "{}\n");
+      const result = await readLibraryFileBytes(join(dir, "a.json"), "a.json");
+      if (result.status !== "ok") throw new Error(result.status);
+      expect(result.stats.size).toBe(3n);
+      expect(typeof result.stats.mtimeNs).toBe("bigint");
+      expect(typeof result.stats.ino).toBe("bigint");
+    });
+  });
+
   it("reads a file of exactly 8 MiB", async () => {
     await withTempDir(async (dir) => {
       await writeFile(join(dir, "a.json"), fileOfSize(MAX_JSON_BYTES));
@@ -35,6 +46,7 @@ describe("readLibraryFileBytes", () => {
         status: "failed",
         issue: { code: "file-too-large", severity: "error", file: "a.json", pointer: null },
       });
+      expect(result.status === "failed" && result.stats?.size).toBe(BigInt(MAX_JSON_BYTES + 1));
     });
   });
 
