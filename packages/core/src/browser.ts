@@ -4,3 +4,8 @@ export type { ReadFailed, ReadOk, ReadResult } from "./json/read.js";
 export { escapePointerToken, MAX_NESTING, readLibraryJson } from "./json/read.js";
 export type { Issue, IssueCode, Severity } from "./validation/issue.js";
 export { ISSUE_SEVERITY, makeIssue } from "./validation/issue.js";
+export { LibrarySchema, type Library } from "./schemas/v1/library.js";
+export { MediaMarkerSchema, type MediaMarker } from "./schemas/v1/marker.js";
+export { ReferenceSchema, type Reference } from "./schemas/v1/reference.js";
+export * as v1Shared from "./schemas/v1/shared.js";
+export { describePath, issuesFromZod, pointerOf, validateValue } from "./validation/zod-issues.js";
