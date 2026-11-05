@@ -58,8 +58,8 @@ export async function readLibraryFileBytes(path: string, file: string): Promise<
     }
   } catch (error) {
     const code = (error as { code?: unknown } | null)?.code;
-    // An error without an errno code is a bug, not an unreadable file: fail loudly.
-    if (typeof code !== "string") throw error;
+    // An error without an errno code (or a Node argument error, ERR_*) is a bug, not an unreadable file: fail loudly.
+    if (typeof code !== "string" || code.startsWith("ERR_")) throw error;
     if (code === "ENOENT") return { status: "missing" };
     return {
       status: "failed",
