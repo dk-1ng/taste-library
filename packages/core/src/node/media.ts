@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { Dirent } from "node:fs";
 import { constants } from "node:fs";
-import { open, readdir, stat } from "node:fs/promises";
+import { access, open, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { FORMAT_REGISTRY, type FormatRegistry } from "../format.js";
 import { readLibraryJson } from "../json/read.js";
@@ -239,23 +239,11 @@ async function checkListed(folder: string, entry: Listed, checksums: boolean): P
 /** Files in a `<ref-id>/` folder of the media folder that no reference lists. */
 async function orphanIssues(
   folder: string,
+  top: readonly Dirent[],
   listed: ReadonlyMap<string, Listed>,
   unknownRefs: ReadonlySet<string>,
 ): Promise<Issue[]> {
   const issues: Issue[] = [];
-  let top: Dirent[];
-  try {
-    top = await readdir(folder, { withFileTypes: true });
-  } catch (error) {
-    return [
-      makeIssue(
-        "unreadable-file",
-        null,
-        null,
-        `The media folder cannot be read (${errnoOf(error)}).`,
-      ),
-    ];
-  }
   const byName = (a: Dirent, b: Dirent): number => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
   for (const entry of [...top].sort(byName)) {
     const ref = entry.name.normalize("NFC");
@@ -264,6 +252,8 @@ async function orphanIssues(
     let children: Dirent[];
     try {
       if (!(await stat(join(folder, entry.name))).isDirectory()) continue;
+      // A reference folder that is a link leaving the media folder is not listed (format-spec §6.2).
+      if ((await resolveMediaPath(folder, ref)).status !== "ok") continue;
       children = await readdir(join(folder, entry.name), { withFileTypes: true });
     } catch (error) {
       const code = errnoOf(error);
@@ -301,9 +291,14 @@ export async function checkMedia(
   options: MediaCheckOptions = {},
 ): Promise<Issue[]> {
   const registry = options.registry ?? FORMAT_REGISTRY;
+  let top: Dirent[];
   try {
-    if (!(await stat(mediaFolder)).isDirectory())
+    if (!(await stat(mediaFolder)).isDirectory()) {
       throw Object.assign(new Error(), { code: "ENOTDIR" });
+    }
+    top = await readdir(mediaFolder, { withFileTypes: true });
+    // A folder that can be listed but not entered would give one error per file.
+    if (process.platform !== "win32") await access(mediaFolder, constants.X_OK);
   } catch (error) {
     return [
       makeIssue(
@@ -328,6 +323,6 @@ export async function checkMedia(
   return [
     ...marker.issues,
     ...perFile.flat(),
-    ...(referencesUnlisted ? [] : await orphanIssues(mediaFolder, listed, unknownRefs)),
+    ...(referencesUnlisted ? [] : await orphanIssues(mediaFolder, top, listed, unknownRefs)),
   ];
 }

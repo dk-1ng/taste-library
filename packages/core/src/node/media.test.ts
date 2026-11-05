@@ -145,6 +145,21 @@ describe("checkMedia", () => {
     },
   );
 
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+    "reports a media folder without permission once",
+    async () => {
+      await withMedia(async (library, media) => {
+        await chmod(media, 0o000);
+        try {
+          const issues = await mediaIssues(library, media);
+          expect(issues.map((i) => [i.code, i.file])).toEqual([["unreadable-file", null]]);
+        } finally {
+          await chmod(media, 0o755);
+        }
+      });
+    },
+  );
+
   it("treats a non-integer marker version as a schema violation, not a newer format", async () => {
     await withMedia(async (library, media) => {
       await writeFile(
@@ -247,6 +262,9 @@ describe("checkMedia", () => {
       );
       expect(brief(issues, "media-mismatch")).toEqual([]);
       expect(brief(issues, "orphan-media").length).toBe(0);
+      // An unlisted file in a linked-out folder is not listed either.
+      await writeFile(join(outside, "m9.png"), makePng(2, 2, 9));
+      expect(brief(await mediaIssues(library, media), "orphan-media")).toEqual([]);
     });
   });
 });
