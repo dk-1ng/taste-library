@@ -24,6 +24,7 @@ export type {
 } from "./node/open.js";
 export { openLibrary } from "./node/open.js";
 export type { FileBytes } from "./node/read-file.js";
+export type { StatFn } from "./node/refresh.js";
 export { MAX_JSON_BYTES, readLibraryFileBytes } from "./node/read-file.js";
 export {
   type CheckOutcome,

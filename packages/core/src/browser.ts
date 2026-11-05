@@ -43,6 +43,29 @@ export type { FileType, FileValue } from "./json/canonical.js";
 export { canonicalIssue, canonicalize, isCanonical, serialize } from "./json/canonical.js";
 export type { ReadFailed, ReadOk, ReadResult } from "./json/read.js";
 export { escapePointerToken, MAX_NESTING, readLibraryJson } from "./json/read.js";
+export type {
+  Backlink,
+  FamilyMember,
+  FamilyOfPiece,
+  IndexedFamily,
+  IndexedReference,
+  IndexInput,
+  LibraryIndex,
+} from "./library-index/build.js";
+export { buildIndex } from "./library-index/build.js";
+export type { LinkState, LinkTarget, Targets } from "./library-index/targets.js";
+export { buildTargets, targetFileOf, targetKey } from "./library-index/targets.js";
+export type { VersionSummary } from "./library-index/versions.js";
+export { versionSummary } from "./library-index/versions.js";
+export type { DerivedState, ReferenceForState } from "./model/derived-state.js";
+export { derivedState } from "./model/derived-state.js";
+export type {
+  AuthoredValue,
+  Effective,
+  LinkWeight,
+  ReviewedLinkValue,
+} from "./model/effective.js";
+export { effectiveOf, linkWeight } from "./model/effective.js";
 export { roundAxis, roundRegion } from "./model/region.js";
 export { differsBesidesUpdatedAt, laterOf, stampFile } from "./model/timestamps.js";
 export { type Directions, DirectionsSchema } from "./schemas/v1/directions.js";
@@ -62,7 +85,12 @@ export { checkLibraryFile } from "./validation/file.js";
 export type { Issue, IssueCode, Severity } from "./validation/issue.js";
 export { ISSUE_SEVERITY, makeIssue } from "./validation/issue.js";
 export type { EntryRead, LibraryEntry, Snapshot, SnapshotFile } from "./validation/library.js";
-export { buildSnapshot, reportOf } from "./validation/library.js";
+export {
+  assembleSnapshot,
+  buildSnapshot,
+  checkEntry,
+  reportOf,
+} from "./validation/library.js";
 export type { Report } from "./validation/report.js";
 export {
   buildReport,
