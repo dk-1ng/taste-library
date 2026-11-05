@@ -1,7 +1,7 @@
-import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { editJson, withGoldenCopy } from "../../test/support/golden.js";
+import { editJson, GOLDEN_V1, withGoldenCopy } from "../../test/support/golden.js";
 import { TEST_REGISTRY } from "../../test/support/registry.js";
 import { FORMAT_REGISTRY } from "../browser.js";
 import { currentLayout } from "../format.js";
@@ -449,6 +449,37 @@ describe("the write gate", () => {
     });
   });
 
+  it("refuses a mixed library until the migration runner exists", async () => {
+    await withGoldenCopy(async (dir) => {
+      await writeFile(
+        join(dir, "library.json"),
+        `${JSON.stringify({ formatVersion: 2, anything: true }, null, 2)}\n`,
+      );
+      const before = await tree(dir);
+      const library = await open(dir, TEST_REGISTRY);
+      const result = await edit(library, "glossary.json", () => undefined);
+      expect(result.status).toBe("refused");
+      if (result.status === "refused") {
+        expect(result.issues.map((i) => i.code)).toContain("mixed-format-versions");
+      }
+      expect(await tree(dir)).toEqual(before);
+    });
+  });
+
+  it("fails with not-a-library when the library folder moves after it was opened", async () => {
+    await withGoldenCopy(async (dir, base) => {
+      const library = await open(dir);
+      await rename(dir, join(base, "moved"));
+      const result = await edit(library, "glossary.json", (g) => {
+        g.terms[0].entry.content.definition = "Changed.";
+      });
+      expect(result).toMatchObject({ status: "failed" });
+      if (result.status === "failed") {
+        expect(["not-a-library", "unreadable-folder"]).toContain(result.failure.code);
+      }
+    });
+  });
+
   it("never replaces a file that has errors", async () => {
     await withGoldenCopy(async (dir) => {
       await editJson(dir, "families/quiet-editorial.json", (f) => {
@@ -456,22 +487,23 @@ describe("the write gate", () => {
       });
       const before = await tree(dir);
       const library = await open(dir);
+      const snapshot = await openLibrary(dir);
+      if (!snapshot.ok) throw new Error(snapshot.message);
+      const own = await snapshot.library.snapshot();
+      if (!own.ok) throw new Error(own.message);
+      const brokenIssues = own.snapshot.files.get("families/quiet-editorial.json")?.issues;
+      // A perfectly valid value over the broken file is still refused, with the broken file's own issues.
+      const valid = structuredClone(
+        JSON.parse(await readFile(join(GOLDEN_V1, "families", "quiet-editorial.json"), "utf8")),
+      );
       const result = await library.write(
         () => ({
-          changes: [
-            {
-              path: "families/quiet-editorial.json",
-              next: { formatVersion: 1, slug: "quiet-editorial" },
-            },
-          ],
+          changes: [{ path: "families/quiet-editorial.json", next: valid }],
           skipped: [],
         }),
         { clock },
       );
-      expect(result.status).toBe("refused");
-      if (result.status === "refused") {
-        expect(result.issues.every((i) => i.file === "families/quiet-editorial.json")).toBe(true);
-      }
+      expect(result).toMatchObject({ status: "refused", issues: brokenIssues });
       expect(await tree(dir)).toEqual(before);
     });
   });

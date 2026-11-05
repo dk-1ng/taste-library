@@ -1,4 +1,4 @@
-import { lstat } from "node:fs/promises";
+import { lstat, stat } from "node:fs/promises";
 import { join } from "node:path";
 import {
   classifyEntry,
@@ -245,6 +245,24 @@ function newBrokenLinks(
   return issues;
 }
 
+/** The open failure when the library folder or its `library.json` no longer exists, else `null`. */
+async function vanished(root: string): Promise<Pick<OpenFailure, "code" | "message"> | null> {
+  for (const [path, failure] of [
+    [root, { code: "unreadable-folder", message: "The library folder cannot be read (ENOENT)." }],
+    [
+      join(root, "library.json"),
+      { code: "not-a-library", message: "The folder has no library.json, so it is not a library." },
+    ],
+  ] as const) {
+    try {
+      await stat(path);
+    } catch (error) {
+      if (errnoOf(error) === "ENOENT") return failure;
+    }
+  }
+  return null;
+}
+
 const encoder = new TextEncoder();
 
 /**
@@ -338,6 +356,12 @@ export async function runWrite(
       ],
       plan.skipped,
     );
+  }
+  if (outcome.failure.errno === "ENOENT" && !outcome.applied) {
+    // The library folder or its `library.json` went away since the snapshot was read (an unmounted
+    // drive, a moved folder): the same failure `openLibrary` gives (docs/design.md section 4, "Durability").
+    const gone = await vanished(context.root);
+    if (gone !== null) return failed(gone);
   }
   return {
     status: "failed",

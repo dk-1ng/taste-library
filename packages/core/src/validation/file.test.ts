@@ -132,3 +132,15 @@ describe("checkLibraryFile", () => {
     expect(other.issues).toMatchObject([{ code: "name-mismatch", pointer: "/slug" }]);
   });
 });
+
+describe("a file whose whole content is null", () => {
+  it.each([
+    ["references/ref-20261101-a1b2c3.json", "reference"],
+    ["families/quiet-editorial.json", "family"],
+    ["projects/landing-redesign/project.json", "project"],
+  ] as const)("%s is a schema violation, not a crash", (path, kind) => {
+    const check = checkLibraryFile(FORMAT_REGISTRY, kind, path, new TextEncoder().encode("null"));
+    expect(check.status).toBe("invalid");
+    expect(check.issues.map((issue) => issue.code)).toContain("schema-violation");
+  });
+});
