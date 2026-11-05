@@ -74,7 +74,6 @@ When the maintainer says "continue":
 4. **Route the work:** spike → `architect`; `complexity: high` → `architect` plans, then `implementer` on `opus`/`high`; test infrastructure → `test-engineer`; otherwise inline, or `implementer` if it spans many files.
 5. **Verify** with `pnpm check` (lint, format check, typecheck, test, build; `docs/design.md` §3) and every acceptance criterion.
 6. **`reviewer`** reviews the branch. On `CHANGES REQUESTED`, fix and review again.
-   **Every finding is settled, never dropped:** it is fixed in the issue, or the maintainer decides to defer it and an issue is created for it. Never mark a finding as "documented" or "known limitation" on your own; ask the maintainer when fixing is not clearly in scope.
 7. If `README.md` changed, **`translator`** updates `docs/pt-BR/README.md`.
 8. **Open the PR** (`Closes #N`, template filled, title = the Conventional Commit the squash will produce). Wait for CI with `gh pr checks <PR> --watch`; merge only when it is green. Ask the maintainer to approve the merge, then run `gh pr merge <PR> --squash --subject "<PR title> (#<issue>) (#<PR>)" --body "<why, if useful>"` with a body that ends with a blank line and `Assisted-by: Claude Code`. GitHub deletes the branch automatically. Then `git switch main && git pull --ff-only`.
 9. **Finish:** `node scripts/loop.mjs finish N`.
