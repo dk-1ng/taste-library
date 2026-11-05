@@ -13,6 +13,7 @@ if (v1 === undefined) throw new Error("The production registry has no version 1.
 
 const v2Schemas: SchemaSet = {
   library: anyV2,
+  marker: anyV2,
   reference: anyV2,
   family: anyV2,
   glossary: anyV2,

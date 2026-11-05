@@ -23,3 +23,5 @@ export type {
   SnapshotResult,
 } from "./node/open.js";
 export { openLibrary } from "./node/open.js";
+export { checkMedia, type MediaCheckOptions } from "./node/media.js";
+export { mediaPathSegments, type ResolvedMedia, resolveMediaPath } from "./node/media-path.js";
