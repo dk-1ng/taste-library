@@ -6,7 +6,15 @@
     "useIgnoreFile": true
   },
   "files": {
-    "includes": ["**/*.ts", "**/*.tsx", "**/*.js", "**/*.mjs", "**/*.json", "!pnpm-lock.yaml"]
+    "includes": [
+      "**/*.ts",
+      "**/*.tsx",
+      "**/*.js",
+      "**/*.mjs",
+      "**/*.json",
+      "!pnpm-lock.yaml",
+      "!packages/core/test/golden"
+    ]
   },
   "formatter": {
     "enabled": true,

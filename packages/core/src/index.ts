@@ -15,3 +15,11 @@ export {
 } from "./node/config.js";
 export type { FileBytes } from "./node/read-file.js";
 export { MAX_JSON_BYTES, readLibraryFileBytes } from "./node/read-file.js";
+export type {
+  Library as OpenLibrary,
+  OpenFailure,
+  OpenOptions,
+  OpenResult,
+  SnapshotResult,
+} from "./node/open.js";
+export { openLibrary } from "./node/open.js";

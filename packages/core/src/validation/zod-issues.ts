@@ -21,7 +21,7 @@ type Segment = string | number | symbol;
 const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 /** Writes every control, format (bidi, zero-width) and line or paragraph separator character as a `\uXXXX` escape, so data never reaches a terminal raw. */
-function escapeControl(text: string): string {
+export function escapeControl(text: string): string {
   return text.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, (c) => {
     const code = c.codePointAt(0) as number;
     // Above U+FFFF a four-digit escape would name another character.

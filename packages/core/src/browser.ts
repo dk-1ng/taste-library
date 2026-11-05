@@ -1,5 +1,14 @@
 // @tastelib/core/browser: pure modules only; nothing here touches the operating system.
 
+export type {
+  EntryClass,
+  FormatLayout,
+  FormatRegistry,
+  FormatVersionSpec,
+  LibraryFileKind,
+  SchemaSet,
+} from "./format.js";
+export { classifyEntry, CURRENT_FORMAT_VERSION, currentLayout, FORMAT_REGISTRY } from "./format.js";
 export type { IdOptions, RandomSource, RefIdOptions } from "./ids/random.js";
 export {
   newGuardrailId,
@@ -28,6 +37,21 @@ export { type Project, ProjectSchema } from "./schemas/v1/project.js";
 export { type Reference, ReferenceSchema } from "./schemas/v1/reference.js";
 export * as v1Shared from "./schemas/v1/shared.js";
 export { type TasteProfile, TasteProfileSchema } from "./schemas/v1/taste-profile.js";
+export type { CrossFile, CrossOptions } from "./validation/cross.js";
+export { crossFileIssues } from "./validation/cross.js";
+export type { FileCheck, FileStatus } from "./validation/file.js";
+export { checkLibraryFile } from "./validation/file.js";
 export type { Issue, IssueCode, Severity } from "./validation/issue.js";
 export { ISSUE_SEVERITY, makeIssue } from "./validation/issue.js";
 export { describePath, issuesFromZod, pointerOf, validateValue } from "./validation/zod-issues.js";
+export type { EntryRead, LibraryEntry, Snapshot, SnapshotFile } from "./validation/library.js";
+export { buildSnapshot, reportOf } from "./validation/library.js";
+export type { Report } from "./validation/report.js";
+export {
+  buildReport,
+  compareIssues,
+  countIssues,
+  mediaNotChecked,
+  REPORT_VERSION,
+  sortIssues,
+} from "./validation/report.js";

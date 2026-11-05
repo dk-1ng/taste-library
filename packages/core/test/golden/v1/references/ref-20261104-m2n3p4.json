@@ -1,0 +1,59 @@
+{
+  "formatVersion": 1,
+  "id": "ref-20261104-m2n3p4",
+  "createdAt": "2026-11-04T12:00:00.000Z",
+  "updatedAt": "2026-11-04T12:00:00.000Z",
+  "source": {
+    "via": "drop",
+    "url": null
+  },
+  "result": {
+    "project": "landing-redesign",
+    "direction": "d1"
+  },
+  "media": [
+    {
+      "id": "m1",
+      "kind": "image",
+      "file": "ref-20261104-m2n3p4/m1.png",
+      "type": "image/png",
+      "bytes": 852,
+      "sha256": "2f3cf52ef952a6d74b738e5d9d066c2a95c752f17df09cccc6e74ea784e77f65",
+      "width": 16,
+      "height": 16,
+      "durationMs": null,
+      "frames": []
+    }
+  ],
+  "note": "Version generated from the first direction.",
+  "pins": [],
+  "interpretations": {
+    "p0": {
+      "origin": "agent",
+      "proposedBy": "claude-code",
+      "proposedAt": "2026-11-04T12:05:00.000Z",
+      "inputSha256": "66c50e1c61c09c619dabc17d5a7b00aa0d6cacc5ef8f3d1689eeb56ed4bd177a",
+      "proposal": {
+        "summary": "A first version of the direction.",
+        "vocabulary": [],
+        "keywords": [
+          "draft"
+        ],
+        "screenTypes": [
+          "landing page"
+        ],
+        "components": [],
+        "aspects": [
+          "layout"
+        ]
+      },
+      "status": "to-review",
+      "correction": null,
+      "reviewedAt": null
+    }
+  },
+  "lastIssued": {
+    "media": 1,
+    "pin": 0
+  }
+}

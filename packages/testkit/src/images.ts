@@ -67,6 +67,75 @@ export function makePng(width: number, height: number, seed = 1): Buffer {
   ]);
 }
 
+/** Adler-32 (RFC 1950) of `bytes`. */
+function adler32(bytes: Uint8Array): number {
+  let a = 1;
+  let b = 0;
+  for (const byte of bytes) {
+    a = (a + byte) % 65521;
+    b = (b + a) % 65521;
+  }
+  return ((b << 16) | a) >>> 0;
+}
+
+/** The largest payload of one stored deflate block (RFC 1951, section 3.2.4). */
+const STORED_BLOCK_MAX = 0xffff;
+
+/** A zlib stream (RFC 1950) made only of stored (uncompressed) deflate blocks: no compressor is involved. */
+function zlibStored(data: Uint8Array): Buffer {
+  const parts: Buffer[] = [Buffer.from([0x78, 0x01])];
+  let offset = 0;
+  do {
+    const length = Math.min(STORED_BLOCK_MAX, data.length - offset);
+    const last = offset + length >= data.length;
+    const head = Buffer.alloc(5);
+    head[0] = last ? 1 : 0; // BFINAL, BTYPE = 00 (stored)
+    head.writeUInt16LE(length, 1);
+    head.writeUInt16LE(~length & 0xffff, 3);
+    parts.push(head, Buffer.from(data.subarray(offset, offset + length)));
+    offset += length;
+  } while (offset < data.length);
+  const trailer = Buffer.alloc(4);
+  trailer.writeUInt32BE(adler32(data), 0);
+  parts.push(trailer);
+  return Buffer.concat(parts);
+}
+
+/**
+ * A valid 8-bit RGB PNG whose bytes never change: the pixels come from the seeded generator, and
+ * the image data is written as stored deflate blocks with hand-written CRC-32 and Adler-32, so no
+ * zlib and no Node version can alter a byte. For fixtures whose size and checksum are recorded in
+ * frozen files (the golden libraries, docs/design.md section 15).
+ */
+export function makeStablePng(width: number, height: number, seed = 1): Buffer {
+  const rgb = pixels(width, height, seed);
+  const stride = width * 3;
+  const raw = Buffer.alloc((stride + 1) * height); // filter byte 0 at the start of each row
+  for (let y = 0; y < height; y++) {
+    raw.set(rgb.subarray(y * stride, (y + 1) * stride), y * (stride + 1) + 1);
+  }
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
+  header[8] = 8; // bit depth
+  header[9] = 2; // color type: RGB
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    pngChunk("IHDR", header),
+    pngChunk("IDAT", zlibStored(raw)),
+    pngChunk("IEND", new Uint8Array(0)),
+  ]);
+}
+
+/** The 32-bit FNV-1a hash of the UTF-8 bytes of `text`: a seed that depends only on the text. */
+export function fnv1a32(text: string): number {
+  let hash = 0x811c9dc5;
+  for (const byte of new TextEncoder().encode(text)) {
+    hash = Math.imul(hash ^ byte, 0x01000193) >>> 0;
+  }
+  return hash >>> 0;
+}
+
 /** A valid 24-bit BMP of the given size; the same arguments always give the same bytes. */
 export function makeBmp(width: number, height: number, seed = 1): Buffer {
   const rgb = pixels(width, height, seed);

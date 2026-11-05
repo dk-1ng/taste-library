@@ -1,0 +1,22 @@
+{
+  "formatVersion": 1,
+  "slug": "dense-dashboards",
+  "createdAt": "2026-11-02T11:00:00.000Z",
+  "updatedAt": "2026-11-02T11:00:00.000Z",
+  "description": {
+    "origin": "user",
+    "content": {
+      "name": "Dense dashboards",
+      "meaning": "Screens where many numbers share one view.",
+      "vocabulary": []
+    },
+    "writtenAt": "2026-11-02T11:00:00.000Z"
+  },
+  "members": [
+    {
+      "target": "ref-20261104-m2n3p4#p0",
+      "origin": "user",
+      "addedAt": "2026-11-04T13:00:00.000Z"
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "formatVersion": 1,
+  "slug": "landing-redesign",
+  "createdAt": "2026-11-03T09:00:00.000Z",
+  "updatedAt": "2026-11-03T10:00:00.000Z",
+  "name": "Landing page redesign",
+  "intent": {
+    "origin": "agent",
+    "proposedBy": "claude-code",
+    "proposedAt": "2026-11-03T09:00:00.000Z",
+    "inputSha256": null,
+    "proposal": {
+      "what": "A landing page for a small tool that tracks reading lists.",
+      "forWhom": "People who read a lot and want to keep track of it.",
+      "userTasks": [
+        "Understand what the tool does",
+        "Sign up"
+      ],
+      "why": "To turn visitors into users."
+    },
+    "status": "accepted",
+    "correction": null,
+    "reviewedAt": "2026-11-03T10:00:00.000Z"
+  },
+  "discarded": [
+    {
+      "text": "Use a dark theme with neon accents",
+      "category": "style"
+    },
+    {
+      "text": "Set everything in a rounded sans-serif",
+      "category": "font"
+    }
+  ]
+}

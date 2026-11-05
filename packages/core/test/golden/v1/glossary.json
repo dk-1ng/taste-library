@@ -1,0 +1,83 @@
+{
+  "formatVersion": 1,
+  "terms": [
+    {
+      "id": "term-2b4d6f",
+      "createdAt": "2026-11-02T12:00:00.000Z",
+      "updatedAt": "2026-11-02T12:00:00.000Z",
+      "pieces": [
+        "ref-20261101-a1b2c3#p0"
+      ],
+      "entry": {
+        "origin": "user",
+        "content": {
+          "term": "Quiet density",
+          "definition": "Much information, little noise."
+        },
+        "writtenAt": "2026-11-02T12:00:00.000Z"
+      }
+    },
+    {
+      "id": "term-7h9k3m",
+      "createdAt": "2026-11-03T12:00:00.000Z",
+      "updatedAt": "2026-11-03T12:00:00.000Z",
+      "pieces": [],
+      "entry": {
+        "origin": "agent",
+        "proposedBy": "claude-code",
+        "proposedAt": "2026-11-03T12:00:00.000Z",
+        "inputSha256": null,
+        "proposal": {
+          "term": "Ambient contrast",
+          "definition": "Contrast that is felt, not announced."
+        },
+        "status": "to-review",
+        "correction": null,
+        "reviewedAt": null
+      }
+    },
+    {
+      "id": "term-9p4r6t",
+      "createdAt": "2026-11-03T12:00:00.000Z",
+      "updatedAt": "2026-11-03T18:00:00.000Z",
+      "pieces": [
+        "ref-20261103-g7h8j9#p0"
+      ],
+      "entry": {
+        "origin": "agent",
+        "proposedBy": "claude-code",
+        "proposedAt": "2026-11-03T12:00:00.000Z",
+        "inputSha256": null,
+        "proposal": {
+          "term": "Scannable",
+          "definition": "Easy to read in a glance."
+        },
+        "status": "corrected",
+        "correction": {
+          "term": "Easy to scan",
+          "definition": "The eye finds the row it needs at once."
+        },
+        "reviewedAt": "2026-11-03T18:00:00.000Z"
+      }
+    },
+    {
+      "id": "term-c3e5g7",
+      "createdAt": "2026-11-03T12:00:00.000Z",
+      "updatedAt": "2026-11-03T19:00:00.000Z",
+      "pieces": [],
+      "entry": {
+        "origin": "agent",
+        "proposedBy": "claude-code",
+        "proposedAt": "2026-11-03T12:00:00.000Z",
+        "inputSha256": null,
+        "proposal": {
+          "term": "quiet density",
+          "definition": "Already in the glossary."
+        },
+        "status": "rejected",
+        "correction": null,
+        "reviewedAt": "2026-11-03T19:00:00.000Z"
+      }
+    }
+  ]
+}

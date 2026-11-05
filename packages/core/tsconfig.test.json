@@ -3,9 +3,10 @@
   "compilerOptions": {
     "types": ["node"],
     "emitDeclarationOnly": true,
+    "rootDir": "${configDir}",
     "outDir": "${configDir}/dist-test",
     "tsBuildInfoFile": "${configDir}/dist-test/tsconfig.tsbuildinfo"
   },
-  "include": ["${configDir}/src/**/*.test.ts"],
+  "include": ["${configDir}/src/**/*.test.ts", "${configDir}/test/**/*.ts"],
   "references": [{ "path": "./tsconfig.json" }, { "path": "../testkit" }]
 }

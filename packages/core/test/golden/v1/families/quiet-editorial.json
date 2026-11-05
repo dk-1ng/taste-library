@@ -1,0 +1,53 @@
+{
+  "formatVersion": 1,
+  "slug": "quiet-editorial",
+  "createdAt": "2026-11-02T09:00:00.000Z",
+  "updatedAt": "2026-11-03T15:00:00.000Z",
+  "description": {
+    "origin": "agent",
+    "proposedBy": "claude-code",
+    "proposedAt": "2026-11-02T09:00:00.000Z",
+    "inputSha256": null,
+    "proposal": {
+      "name": "Quiet editorial",
+      "meaning": "Calm layouts that carry a lot of information without shouting.",
+      "vocabulary": [
+        "quiet density"
+      ]
+    },
+    "status": "accepted",
+    "correction": null,
+    "reviewedAt": "2026-11-02T10:00:00.000Z"
+  },
+  "members": [
+    {
+      "target": "ref-20261101-a1b2c3#p0",
+      "origin": "user",
+      "addedAt": "2026-11-02T09:05:00.000Z"
+    },
+    {
+      "target": "ref-20261101-a1b2c3#p1",
+      "origin": "agent",
+      "proposedBy": "claude-code",
+      "proposedAt": "2026-11-02T09:06:00.000Z",
+      "status": "to-review",
+      "reviewedAt": null
+    },
+    {
+      "target": "ref-20261103-g7h8j9#p0",
+      "origin": "agent",
+      "proposedBy": "claude-code",
+      "proposedAt": "2026-11-03T15:00:00.000Z",
+      "status": "accepted",
+      "reviewedAt": "2026-11-03T16:00:00.000Z"
+    },
+    {
+      "target": "ref-20261103-g7h8j9#p1",
+      "origin": "agent",
+      "proposedBy": "claude-code",
+      "proposedAt": "2026-11-03T15:00:00.000Z",
+      "status": "rejected",
+      "reviewedAt": "2026-11-03T16:00:00.000Z"
+    }
+  ]
+}
