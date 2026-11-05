@@ -103,6 +103,18 @@ describe("the index: families", () => {
     expect(index.familiesOf.get(`${A}#p1`)).toEqual([{ slug: "quiet-editorial", tentative: true }]);
   });
 
+  it("sorts the families by slug, not by path (`dense` before `dense-dashboards`)", () => {
+    const index = indexOf(
+      goldenSnapshot((files) => {
+        const family = structuredClone(files.get("families/dense-dashboards.json")) as Json;
+        family.slug = "dense";
+        files.set("families/dense.json", family);
+      }),
+    );
+    expect(index.families.get("dense")?.path).toBe("families/dense.json");
+    expect([...index.families.keys()]).toEqual(["dense", "dense-dashboards", "quiet-editorial"]);
+  });
+
   it("gives a piece its families sorted by slug", () => {
     const index = indexOf(
       goldenSnapshot((files) => {

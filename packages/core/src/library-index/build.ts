@@ -175,7 +175,8 @@ export function buildIndex(input: IndexInput): LibraryIndex {
   return {
     versions: input.versions,
     references,
-    families,
+    // Paths put `dense-dashboards.json` before `dense.json`; the slugs go the other way.
+    families: sortedMap(families),
     familiesOf: sortedMap(familiesOf),
     targets,
     backlinks: sortedMap(backlinks),
