@@ -56,7 +56,7 @@ describe("opening a library", () => {
     });
   });
 
-  it("reads again on every snapshot after the first", async () => {
+  it("refreshes on every snapshot, so a file added after opening is seen", async () => {
     await withGoldenCopy(async (library) => {
       const opened = await openLibrary(library);
       if (!opened.ok) throw new Error(opened.message);

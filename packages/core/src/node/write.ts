@@ -12,11 +12,12 @@ import { canonicalize, serialize } from "../json/canonical.js";
 import { differsBesidesUpdatedAt, stampFile } from "../model/timestamps.js";
 import { Slug } from "../schemas/v1/shared.js";
 import { type CrossFile, crossFileIssues, type LinkEvent } from "../validation/cross.js";
-import { checkLibraryFile } from "../validation/file.js";
+import { checkLibraryFile, type FileCheck } from "../validation/file.js";
 import { type Issue, makeIssue } from "../validation/issue.js";
 import type { Snapshot } from "../validation/library.js";
 import { sortIssues } from "../validation/report.js";
 import type { OpenFailure, SnapshotResult } from "./open.js";
+import type { Written } from "./refresh.js";
 import {
   checkFile,
   type Expected,
@@ -71,8 +72,13 @@ export interface WriteContext {
   root: string;
   registry: FormatRegistry;
   sha256: (bytes: Uint8Array) => string;
-  /** A fresh snapshot (the first call after opening returns what was read while opening). */
+  /** A fresh snapshot: every call refreshes first (docs/design.md section 4, "Index"). */
   snapshot: () => Promise<SnapshotResult>;
+  /**
+   * Layer 9: told after each file that reached the disk, with the bytes written and their check
+   * (`null` for a deletion), so the next refresh reads it back once and compares the bytes.
+   */
+  wrote?: (path: string, written: Written) => void;
 }
 
 const BACKUP = ".tastelib/migration-backup";
@@ -339,10 +345,12 @@ function blockingIssues(registry: FormatRegistry, snapshot: Snapshot, plan: Plan
 
 const encoder = new TextEncoder();
 
-/** One file ready for the disk: its final bytes, or `null` for a deletion. */
+/** One file ready for the disk: its final bytes and their check, or `null` for a deletion. */
 interface Ready {
   path: string;
+  kind: LibraryFileKind;
   bytes: Uint8Array | null;
+  check: FileCheck | null;
   expected: Expected;
 }
 
@@ -428,7 +436,7 @@ export async function runWrite(
   //    an internal assertion.
   const now = (options.clock?.() ?? new Date()).toISOString();
   const ready: Ready[] = prepared.map(({ path, kind, value, expected, previous }) => {
-    if (value === null) return { path, bytes: null, expected };
+    if (value === null) return { path, kind, bytes: null, check: null, expected };
     const bytes = encoder.encode(serialize(kind, stampFile(kind, previous, value, now)));
     const final = checkLibraryFile(registry, kind, path, bytes);
     if (final.status !== "valid" || final.issues.length > 0) {
@@ -436,7 +444,7 @@ export async function runWrite(
         `The write layer produced an invalid ${path}: ${JSON.stringify(final.issues)}`,
       );
     }
-    return { path, bytes, expected };
+    return { path, kind, bytes, check: final, expected };
   });
 
   // 8. Replace. First every target is checked against the bytes that were read, so a change found
@@ -489,11 +497,21 @@ export async function runWrite(
     else if (file.expected === "absent")
       throw new Error(`"${file.path}" to delete was never read.`);
     else outcome = await removeFile(target, { ...optionsFor(file), expected: file.expected });
+    const applied = outcome.status === "done" || (outcome.status === "failed" && outcome.applied);
+    // 9. The snapshot learns what reached the disk (design layer 9).
+    if (applied) {
+      context.wrote?.(
+        file.path,
+        file.bytes === null || file.check === null
+          ? null
+          : { kind: file.kind, bytes: file.bytes, check: file.check },
+      );
+    }
     if (outcome.status === "done") {
       await at?.(`${file.bytes === null ? "deleted" : "wrote"}:${file.path}`);
       continue;
     }
-    return stopAt(index, outcome, outcome.status === "failed" && outcome.applied);
+    return stopAt(index, outcome, applied);
   }
   return { status: "written", written: paths, skipped, notices: [] };
 }
