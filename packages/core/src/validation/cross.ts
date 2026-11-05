@@ -28,6 +28,8 @@ export interface CrossOptions {
   current: number;
   /** SHA-256 of the bytes, as 64 lowercase hex characters. */
   sha256: (bytes: Uint8Array) => string;
+  /** Folders that exist but could not be listed: what lies under one is unknown, so a link into it is unresolved. */
+  unlistedFolders?: readonly string[];
 }
 
 type Path = (string | number)[];
@@ -82,6 +84,8 @@ export function crossFileIssues(
     kind: K,
   ): Usable<K> | "absent" | "unresolved" => {
     const file = files.get(path);
+    const unlisted = options.unlistedFolders ?? [];
+    if (unlisted.some((folder) => path.startsWith(`${folder}/`))) return "unresolved";
     if (file === undefined || file.kind !== kind) return "absent";
     if (file.status !== "valid" || file.formatVersion !== options.current) return "unresolved";
     return { value: file.value as FileValue<K> };

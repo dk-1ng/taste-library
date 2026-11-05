@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { FORMAT_REGISTRY } from "../format.js";
+import { z } from "zod";
+import { FORMAT_REGISTRY, type FormatRegistry } from "../format.js";
 import { serialize } from "../json/canonical.js";
 import { checkLibraryFile } from "./file.js";
 
@@ -95,5 +96,39 @@ describe("checkLibraryFile", () => {
     );
     const mismatch = check.issues.find((i) => i.code === "name-mismatch");
     expect(mismatch?.message).toMatch(/^[\x20-\x7e]+$/);
+  });
+
+  it("compares the name and the value after NFC, so a folder in another Unicode form is no mismatch", () => {
+    // Real slugs are ASCII, so the project schema is relaxed here to let the comparison itself run.
+    const v1 = FORMAT_REGISTRY.versions[1];
+    if (v1 === undefined) throw new Error("no version 1");
+    const relaxed: FormatRegistry = {
+      current: 1,
+      versions: {
+        1: {
+          schemas: {
+            ...v1.schemas,
+            project: z.looseObject({ formatVersion: z.literal(1), slug: z.string() }),
+          },
+          layout: v1.layout,
+        },
+      },
+    };
+    const slug = "caf\u00e9"; // precomposed, as typed
+    const path = `projects/${slug.normalize("NFD")}/project.json`; // as macOS may list it
+    const same = checkLibraryFile(
+      relaxed,
+      "project",
+      path,
+      bytes(JSON.stringify({ formatVersion: 1, slug })),
+    );
+    expect(same.issues).toEqual([]);
+    const other = checkLibraryFile(
+      relaxed,
+      "project",
+      path,
+      bytes(JSON.stringify({ formatVersion: 1, slug: "cafe" })),
+    );
+    expect(other.issues).toMatchObject([{ code: "name-mismatch", pointer: "/slug" }]);
   });
 });

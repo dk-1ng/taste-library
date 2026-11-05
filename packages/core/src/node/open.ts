@@ -32,6 +32,8 @@ export interface OpenOptions {
   registry?: FormatRegistry;
   /** SHA-256 of bytes as lowercase hex, for `proposal-stale`; `node:crypto` by default. */
   sha256?: (bytes: Uint8Array) => string;
+  /** Replaces `readdir` (tests inject listing failures that cannot be made portably). */
+  readdir?: typeof readdir;
 }
 
 /** Failures that are not validation issues (docs/design.md section 3): the command line turns them into exit 2. */
@@ -82,23 +84,28 @@ interface Listed {
   /** The names as the file system gave them, to read the file back. */
   ioSegments: string[];
   kind: LibraryFileKind;
+  /** A symbolic link that leads to nothing: the file cannot be read. */
+  brokenLink: boolean;
 }
 
 interface Listing {
   files: Listed[];
   issues: Issue[];
+  /** Folders (relative paths) that exist but could not be listed: the links into them are unresolved. */
+  unlisted: string[];
 }
 
-async function isDirectory(
+/** Whether an entry is a folder (following a symbolic link), and whether it is a link that leads to nothing. */
+async function inspect(
   entry: { isDirectory(): boolean; isSymbolicLink(): boolean },
   path: string,
-): Promise<boolean> {
-  if (entry.isDirectory()) return true;
-  if (!entry.isSymbolicLink()) return false;
+): Promise<{ directory: boolean; broken: boolean }> {
+  if (entry.isDirectory()) return { directory: true, broken: false };
+  if (!entry.isSymbolicLink()) return { directory: false, broken: false };
   try {
-    return (await stat(path)).isDirectory();
+    return { directory: (await stat(path)).isDirectory(), broken: false };
   } catch {
-    return false;
+    return { directory: false, broken: true };
   }
 }
 
@@ -110,23 +117,26 @@ function errno(error: unknown): string {
 }
 
 /** Lists the format folders. Throws only for the library folder itself; a subfolder that cannot be read is an issue. */
-async function listLibrary(root: string, registry: FormatRegistry): Promise<Listing> {
+async function listLibrary(
+  root: string,
+  registry: FormatRegistry,
+  list: typeof readdir,
+): Promise<Listing> {
   const layout = currentLayout(registry);
-  const listing: Listing = { files: [], issues: [] };
+  const listing: Listing = { files: [], issues: [], unlisted: [] };
 
   const walk = async (relative: string, ioSegments: string[], top: boolean): Promise<void> => {
     let dirents: Dirent[];
     try {
-      dirents = await readdir(join(root, ...ioSegments), { withFileTypes: true });
+      dirents = await list(join(root, ...ioSegments), { withFileTypes: true });
     } catch (error) {
       if (top) throw error;
+      // A folder that disappeared since its parent was listed is treated as deleted.
+      const code = errno(error);
+      if (code === "ENOENT" || code === "ENOTDIR") return;
+      listing.unlisted.push(relative);
       listing.issues.push(
-        makeIssue(
-          "unreadable-file",
-          relative,
-          null,
-          `The folder cannot be read (${errno(error)}).`,
-        ),
+        makeIssue("unreadable-file", relative, null, `The folder cannot be read (${code}).`),
       );
       return;
     }
@@ -137,10 +147,15 @@ async function listLibrary(root: string, registry: FormatRegistry): Promise<List
     for (const { dirent, name } of named) {
       const childPath = relative === "" ? name : `${relative}/${name}`;
       const childIo = [...ioSegments, dirent.name];
-      const directory = await isDirectory(dirent, join(root, ...childIo));
+      const { directory, broken } = await inspect(dirent, join(root, ...childIo));
       const entry = classifyEntry(layout, relative, name, directory);
       if (entry.type === "file") {
-        listing.files.push({ path: childPath, ioSegments: childIo, kind: entry.kind });
+        listing.files.push({
+          path: childPath,
+          ioSegments: childIo,
+          kind: entry.kind,
+          brokenLink: broken,
+        });
       } else if (entry.type === "folder") {
         await walk(childPath, childIo, false);
       } else if (entry.type === "unexpected") {
@@ -175,10 +190,11 @@ async function load(
   root: string,
   registry: FormatRegistry,
   sha256: (bytes: Uint8Array) => string,
+  list: typeof readdir,
 ): Promise<SnapshotResult> {
   let listing: Listing;
   try {
-    listing = await listLibrary(root, registry);
+    listing = await listLibrary(root, registry, list);
   } catch (error) {
     return {
       ok: false,
@@ -194,6 +210,16 @@ async function load(
   if (!listing.files.some((file) => file.path === "library.json")) return notALibrary;
 
   const reads = await mapLimit(listing.files, READ_CONCURRENCY, async (file) => {
+    // A link that leads to nothing is reported, never dropped as if the file were deleted.
+    if (file.brokenLink) {
+      const issue = makeIssue(
+        "unreadable-file",
+        file.path,
+        null,
+        "The path is a symbolic link that leads to nothing.",
+      );
+      return { file, result: { status: "failed", issue } as const };
+    }
     const result = await readLibraryFileBytes(join(root, ...file.ioSegments), file.path);
     return { file, result };
   });
@@ -210,7 +236,10 @@ async function load(
         : { status: "failed", issue: result.issue };
     entries.push({ path: file.path, kind: file.kind, read });
   }
-  return { ok: true, snapshot: buildSnapshot(registry, entries, listing.issues, sha256) };
+  return {
+    ok: true,
+    snapshot: buildSnapshot(registry, entries, listing.issues, sha256, listing.unlisted),
+  };
 }
 
 /**
@@ -221,7 +250,8 @@ async function load(
 export async function openLibrary(root: string, options: OpenOptions = {}): Promise<OpenResult> {
   const registry = options.registry ?? FORMAT_REGISTRY;
   const sha256 = options.sha256 ?? sha256Hex;
-  const first = await load(root, registry, sha256);
+  const list = options.readdir ?? readdir;
+  const first = await load(root, registry, sha256, list);
   if (!first.ok) return first;
   let pending: SnapshotResult | null = first;
   return {
@@ -233,7 +263,7 @@ export async function openLibrary(root: string, options: OpenOptions = {}): Prom
           pending = null;
           return result;
         }
-        return load(root, registry, sha256);
+        return load(root, registry, sha256, list);
       },
     },
   };

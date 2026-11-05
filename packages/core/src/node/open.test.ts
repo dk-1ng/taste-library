@@ -1,5 +1,5 @@
-import { mkdir, rename, rm, symlink, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, readdir, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { join, sep } from "node:path";
 import { withTempDir } from "@tastelib/testkit";
 import { describe, expect, it } from "vitest";
 import { editJson, withGoldenCopy } from "../../test/support/golden.js";
@@ -135,6 +135,82 @@ describe("opening a library", () => {
   });
 });
 
+/** A `readdir` that fails with an errno code for the given folders (relative to the library). */
+function failingReaddir(library: string, failures: Record<string, string>): typeof readdir {
+  return (async (path: string, options: never) => {
+    for (const [folder, code] of Object.entries(failures)) {
+      if (path === join(library, ...folder.split("/"))) {
+        throw Object.assign(new Error("injected"), { code });
+      }
+    }
+    return readdir(path, options);
+  }) as typeof readdir;
+}
+
+describe("folders that cannot be listed", () => {
+  it("makes links into a folder that failed to list unresolved, not dangling, and reports the folder", async () => {
+    await withGoldenCopy(async (library) => {
+      const opened = await openLibrary(library, {
+        readdir: failingReaddir(library, {
+          references: "EACCES",
+          "projects/landing-redesign": "EIO",
+        }),
+      });
+      if (!opened.ok) throw new Error(opened.message);
+      const result = await opened.library.snapshot();
+      if (!result.ok) throw new Error(result.message);
+      const issues = result.snapshot.issues;
+      expect(pick(issues, "unreadable-file")).toEqual([
+        ["error", "projects/landing-redesign", null],
+        ["error", "references", null],
+      ]);
+      // Every reference, the project and its directions are unknown, so nothing dangles.
+      expect(pick(issues, "dangling-link")).toEqual([]);
+      expect(JSON.stringify(issues)).not.toContain(library);
+      expect(sep.length).toBe(1);
+    });
+  });
+
+  it("treats a folder that disappeared since its parent was listed as deleted", async () => {
+    await withGoldenCopy(async (library) => {
+      const opened = await openLibrary(library, {
+        readdir: failingReaddir(library, {
+          "projects/internal-dashboard": "ENOENT",
+          families: "ENOTDIR",
+        }),
+      });
+      if (!opened.ok) throw new Error(opened.message);
+      const result = await opened.library.snapshot();
+      if (!result.ok) throw new Error(result.message);
+      expect(pick(result.snapshot.issues, "unreadable-file")).toEqual([]);
+      // Deleted means absent: the directions of the project that exist still link to families that are gone.
+      expect(pick(result.snapshot.issues, "dangling-link")).toEqual([
+        ["warning", "projects/landing-redesign/directions.json", "/directions/0/family"],
+      ]);
+    });
+  });
+
+  it("reports a symbolic link that leads to nothing where a file belongs as unreadable-file", async () => {
+    await withGoldenCopy(async (library) => {
+      try {
+        await symlink(
+          join(library, "nowhere.json"),
+          join(library, "references", "ref-20261105-zzzzzz.json"),
+        );
+        await symlink(join(library, "nowhere.txt"), join(library, "references", "notes.txt"));
+      } catch {
+        return; // creating links needs extra rights on some Windows setups
+      }
+      const issues = await issuesOf(library);
+      expect(pick(issues, "unreadable-file")).toEqual([
+        ["error", "references/ref-20261105-zzzzzz.json", null],
+      ]);
+      // A link with a name the format does not know is unexpected, as any other file.
+      expect(pick(issues, "unexpected-file")).toEqual([["warning", "references/notes.txt", null]]);
+    });
+  });
+});
+
 describe("folder codes", () => {
   it("name-mismatch: a reference, a family and a project that hold another identifier than their name", async () => {
     await withGoldenCopy(async (library) => {
@@ -176,19 +252,10 @@ describe("folder codes", () => {
     });
   });
 
-  it("name-mismatch: compares after NFC, so a form the file system changed is not a mismatch", async () => {
-    await withTempDir(async (dir) => {
-      // The names of the format are ASCII; this checks the rule on the comparison itself.
-      const nfc = "café";
-      expect(nfc.normalize("NFC")).toBe(nfc.normalize("NFD").normalize("NFC"));
-      expect(dir).toContain("Usuário");
-    });
-  });
-
   it("unexpected-file: any other file or folder inside a format folder", async () => {
     await withGoldenCopy(async (library) => {
       await writeFile(join(library, "references", "notes.txt"), "x");
-      await writeFile(join(library, "references", "ref-20261101-a1b2c3.JSON"), "{}");
+      await writeFile(join(library, "references", "notes.JSON"), "{}");
       await mkdir(join(library, "families", "nested"));
       await writeFile(join(library, "projects", "loose.json"), "{}");
       await writeFile(join(library, "projects", "landing-redesign", "extra.json"), "{}");
@@ -199,8 +266,8 @@ describe("folder codes", () => {
         ["warning", "projects/landing-redesign/deeper", null],
         ["warning", "projects/landing-redesign/extra.json", null],
         ["warning", "projects/loose.json", null],
+        ["warning", "references/notes.JSON", null],
         ["warning", "references/notes.txt", null],
-        ["warning", "references/ref-20261101-a1b2c3.JSON", null],
       ]);
       expect(issues.every((issue) => issue.severity === "warning")).toBe(true);
     });

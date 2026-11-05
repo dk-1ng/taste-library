@@ -55,6 +55,8 @@ export function buildSnapshot(
   entries: readonly LibraryEntry[],
   folderIssues: readonly Issue[],
   sha256: (bytes: Uint8Array) => string,
+  /** Folders (relative paths) that exist but could not be listed: a link into one is unresolved, not dangling. */
+  unlistedFolders: readonly string[] = [],
 ): Snapshot {
   const files = new Map<string, SnapshotFile>();
   const issues: Issue[] = [...folderIssues];
@@ -95,7 +97,7 @@ export function buildSnapshot(
       value: file.value,
     });
   }
-  issues.push(...crossFileIssues(cross, { current: registry.current, sha256 }));
+  issues.push(...crossFileIssues(cross, { current: registry.current, sha256, unlistedFolders }));
 
   return {
     formatVersion: files.get("library.json")?.formatVersion ?? null,
