@@ -1,5 +1,6 @@
-import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { execFileSync } from "node:child_process";
+import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { join, sep } from "node:path";
 import { withTempDir } from "@tastelib/testkit";
 import { describe, expect, it } from "vitest";
 import { type FileSystem, realFileSystem, removeFile, replaceFile } from "./replace-file.js";
@@ -293,14 +294,95 @@ describe("replaceFile", () => {
     await withTempDir(async (dir) => {
       const target = join(dir, "a.json");
       await writeFile(target, "old");
+      let reads = 0;
+      const counting: FileSystem = {
+        ...realFileSystem,
+        open: (async (...args: Parameters<FileSystem["open"]>) => {
+          const handle = await realFileSystem.open(...args);
+          const read = handle.read.bind(handle) as (...a: unknown[]) => Promise<unknown>;
+          (handle as { read: unknown }).read = (...a: unknown[]) => {
+            reads += 1;
+            return read(...a);
+          };
+          return handle;
+        }) as FileSystem["open"],
+      };
       const result = await replaceFile(target, bytes("mine"), {
         expected: bytes("old"),
+        fs: counting,
         at: async (point) => {
           if (point === "before-rename") await writeFile(target, Buffer.alloc(1024, 0x20));
         },
       });
       expect(result.status).toBe("write-conflict");
+      expect(reads).toBe(0);
       expect((await stat(target)).size).toBe(1024);
+    });
+  });
+
+  it.skipIf(process.platform === "win32")(
+    "does not hang on a FIFO at the target",
+    async () => {
+      await withTempDir(async (dir) => {
+        const target = join(dir, "a.json");
+        execFileSync("mkfifo", [target]);
+        const result = await replaceFile(target, bytes("x"), { expected: "absent" });
+        expect(result.status).toBe("write-conflict");
+        expect(await readdir(dir)).toEqual(["a.json"]);
+      });
+    },
+    10000,
+  );
+
+  it("returns an I/O error thrown by the caller's check, with nothing left behind", async () => {
+    await withTempDir(async (dir) => {
+      const result = await replaceFile(join(dir, "sub", "a.json"), bytes("x"), {
+        expected: "absent",
+        conflictCheck: async () => {
+          throw Object.assign(new Error("EIO"), { code: "EIO" });
+        },
+      });
+      expect(result).toMatchObject({
+        status: "failed",
+        failure: { operation: "conflict-check", errno: "EIO" },
+      });
+      expect(await readdir(dir)).toEqual([]);
+    });
+  });
+
+  it("never recreates the root, even written with a trailing separator, when it vanishes during the walk", async () => {
+    await withTempDir(async (dir) => {
+      const root = join(dir, "lib");
+      await mkdir(root);
+      let statCalls = 0;
+      const fs: FileSystem = {
+        ...realFileSystem,
+        stat: (async (...args: Parameters<FileSystem["stat"]>) => {
+          statCalls += 1;
+          if (statCalls === 2) await rm(root, { recursive: true });
+          return realFileSystem.stat(...args);
+        }) as FileSystem["stat"],
+      };
+      const result = await replaceFile(join(root, "references", "r.json"), bytes("x"), {
+        expected: "absent",
+        root: `${root}${sep}`,
+        fs,
+      });
+      expect(result).toMatchObject({ status: "failed", failure: { errno: "ENOENT" } });
+      expect(await readdir(dir)).toEqual([]);
+    });
+  });
+
+  it("refuses a target outside the root", async () => {
+    await withTempDir(async (dir) => {
+      const root = join(dir, "lib");
+      await mkdir(root);
+      const result = await replaceFile(join(dir, "elsewhere", "a.json"), bytes("x"), {
+        expected: "absent",
+        root,
+      });
+      expect(result).toMatchObject({ status: "failed", failure: { errno: "EINVAL" } });
+      expect(await readdir(dir)).toEqual(["lib"]);
     });
   });
 

@@ -1,6 +1,6 @@
 import { constants } from "node:fs";
 import * as fsPromises from "node:fs/promises";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { randomPart, type RandomSource } from "../ids/random.js";
 
 /**
@@ -121,7 +121,7 @@ function context(target: string, options: WriteOptions): Context {
     now: options.now ?? (() => performance.now()),
     sleep: options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms))),
     at: options.at ?? (() => undefined),
-    root: options.root,
+    root: options.root === undefined ? undefined : resolve(options.root),
     conflictCheck: options.conflictCheck,
   };
 }
@@ -152,18 +152,30 @@ async function io<T>(ctx: Context, operation: string, call: () => Promise<T>): P
  * first, on the same handle, so a target that grew huge is never read.
  */
 async function checkTarget(ctx: Context, expected: Expected): Promise<void> {
-  if ((await ctx.conflictCheck?.()) === true) {
+  const conflictCheck = ctx.conflictCheck;
+  if (conflictCheck !== undefined && (await io(ctx, "conflict-check", conflictCheck)) === true) {
     throw new Stop({ status: "write-conflict", file: ctx.file });
   }
   let same: boolean;
   try {
-    const handle = await ctx.fs.open(ctx.target, constants.O_RDONLY);
+    // Non-blocking, as the reader does: a FIFO at the target must not hang the open.
+    const handle = await ctx.fs.open(ctx.target, constants.O_RDONLY | (constants.O_NONBLOCK ?? 0));
     try {
       const info = await handle.stat();
       if (expected === "absent" || !info.isFile() || info.size !== expected.byteLength) {
         same = false;
       } else {
-        same = Buffer.compare(expected, await handle.readFile()) === 0;
+        // Read at most one byte more than expected, so a file that grew after the stat is a mismatch.
+        const buffer = Buffer.alloc(expected.byteLength + 1);
+        let length = 0;
+        while (length < buffer.length) {
+          const { bytesRead } = await handle.read(buffer, length, buffer.length - length, length);
+          if (bytesRead === 0) break;
+          length += bytesRead;
+        }
+        same =
+          length === expected.byteLength &&
+          Buffer.compare(expected, buffer.subarray(0, length)) === 0;
       }
     } finally {
       await handle.close();
@@ -213,9 +225,26 @@ async function withRetries(
 async function createMissingFolders(ctx: Context, folder: string): Promise<string[]> {
   const missing: string[] = [];
   let current = folder;
-  if (ctx.root !== undefined) {
+  const root = ctx.root;
+  if (root !== undefined) {
+    // `relative` is case-insensitive on Windows and ignores trailing separators.
+    const inside = relative(root, folder);
+    if (inside.startsWith("..") || isAbsolute(inside)) {
+      throw new Stop({
+        status: "failed",
+        failure: {
+          code: "io-error",
+          operation: "mkdir",
+          file: ctx.file,
+          errno: "EINVAL",
+          message: "The target is outside the library folder.",
+        },
+        applied: false,
+        createdFolders: [],
+      });
+    }
     try {
-      await ctx.fs.stat(ctx.root);
+      await ctx.fs.stat(root);
     } catch (error) {
       const errno = errnoOf(error);
       if (errno === undefined) throw error;
@@ -230,7 +259,10 @@ async function createMissingFolders(ctx: Context, folder: string): Promise<strin
       const errno = errnoOf(error);
       if (errno === undefined) throw error;
       if (errno !== "ENOENT") throw failure(ctx, "stat", error, errno);
-      if (current === ctx.root) throw failure(ctx, "stat", error, errno);
+      // The root vanished during the walk: never recreate the library folder or anything above it.
+      if (root !== undefined && relative(root, current) === "") {
+        throw failure(ctx, "stat", error, errno);
+      }
       missing.unshift(current);
       const parent = dirname(current);
       if (parent === current) break;
@@ -312,7 +344,7 @@ export async function replaceFile(
   options: WriteOptions,
 ): Promise<WriteOutcome> {
   const ctx = context(target, options);
-  const folder = dirname(target);
+  const folder = ctx.root === undefined ? dirname(target) : resolve(dirname(target));
   const temporary = join(folder, `.${basename(target)}.tmp-${randomPart(8, options.random)}`);
   let createdFolders: string[] = [];
   let temporaryExists = false;
