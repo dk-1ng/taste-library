@@ -13,6 +13,15 @@ export {
   resolveConfigPath,
   writeConfig,
 } from "./node/config.js";
+export {
+  type Expected,
+  type FileSystem,
+  type IoFailure,
+  removeFile,
+  replaceFile,
+  type WriteOptions,
+  type WriteOutcome,
+} from "./node/replace-file.js";
 export type { FileBytes } from "./node/read-file.js";
 export { MAX_JSON_BYTES, readLibraryFileBytes } from "./node/read-file.js";
 export type {
