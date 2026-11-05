@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { addRuleIssue } from "../schemas/v1/shared.js";
-import { describePath, issuesFromZod, pointerOf } from "./zod-issues.js";
+import { describePath, issuesFromZod, pointerOf, validateValue } from "./zod-issues.js";
 
 function run(schema: z.ZodType, value: unknown) {
   const result = schema.safeParse(value, { reportInput: true });
@@ -87,5 +87,16 @@ describe("issuesFromZod", () => {
   it("names keys that are not plain identifiers in the message and escapes them in the pointer", () => {
     const issues = run(z.record(z.string(), z.number()), { "a/b": "x" });
     expect(issues[0]).toMatchObject({ pointer: "/a~1b", message: '["a/b"]: must be a number.' });
+  });
+});
+
+describe("validateValue", () => {
+  const schema = z.strictObject({ a: z.string(), r: z.record(z.string(), z.number()) });
+  it("returns no issue for a valid value", () => {
+    expect(validateValue(schema, { a: "x", r: {} }, "f.json")).toEqual([]);
+  });
+  it("tells a missing field from a wrong type, and names an array given to a record", () => {
+    const messages = validateValue(schema, { r: [] }, "f.json").map((i) => i.message);
+    expect(messages).toEqual(["a: is required.", "r: must be an object."]);
   });
 });

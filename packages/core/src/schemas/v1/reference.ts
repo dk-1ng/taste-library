@@ -67,10 +67,14 @@ const Frame = z.strictObject({
   height: integer(1, 1000000),
 });
 
-const Media = z
-  .strictObject({
+/**
+ * The fields of a media item. Only a video has frames: for an image or a page the list is not
+ * parsed at all, so a stray list of frames is reported once, as a whole.
+ */
+function mediaShape<K extends z.ZodType, F extends z.ZodType>(kind: K, frames: F) {
+  return {
     id: MediaId,
-    kind: z.enum(["image", "page", "video"]),
+    kind,
     file: MediaPath,
     type: z.enum(MEDIA_TYPES),
     bytes: integer(1),
@@ -78,8 +82,19 @@ const Media = z
     width: integer(1, 1000000),
     height: integer(1, 1000000),
     durationMs: integer(1).nullable(),
-    frames: z.array(Frame).max(1000),
-  })
+    frames,
+  };
+}
+
+const NoFrames = z.array(z.unknown()).superRefine((frames, ctx) => {
+  if (frames.length > 0) addRuleIssue(ctx, [], 'must be empty unless kind is "video".');
+});
+
+const Media = z
+  .discriminatedUnion("kind", [
+    z.strictObject(mediaShape(z.enum(["image", "page"]), NoFrames)),
+    z.strictObject(mediaShape(z.literal("video"), z.array(Frame).max(1000))),
+  ])
   .check(
     crossCheck((raw, ctx) => {
       const media = objectOf(raw);
@@ -87,26 +102,25 @@ const Media = z
       if (kind !== "image" && kind !== "page" && kind !== "video") return;
       const isVideo = kind === "video";
       const type = stringOf(media.type);
-      if (type !== undefined && type in EXTENSION) {
+      if (type !== undefined && Object.hasOwn(EXTENSION, type)) {
         if (isVideo && !type.startsWith("video/")) {
           addRuleIssue(ctx, ["type"], 'must be a video type when kind is "video".');
         } else if (!isVideo && !type.startsWith("image/")) {
           addRuleIssue(ctx, ["type"], `must be an image type when kind is "${kind}".`);
         }
       }
-      const duration = media.durationMs;
-      if (isVideo && duration === null) {
+      const rawDuration = media.durationMs;
+      const duration =
+        countOf(rawDuration) !== undefined && (rawDuration as number) >= 1
+          ? (rawDuration as number)
+          : undefined;
+      if (isVideo && rawDuration === null) {
         addRuleIssue(ctx, ["durationMs"], 'must not be null when kind is "video".');
-      } else if (!isVideo && typeof duration === "number") {
+      } else if (!isVideo && duration !== undefined) {
         addRuleIssue(ctx, ["durationMs"], 'must be null unless kind is "video".');
       }
+      if (!isVideo) return;
       const frames = listOf(media.frames);
-      if (!isVideo) {
-        if (frames.length > 0) {
-          addRuleIssue(ctx, ["frames"], 'must be empty unless kind is "video".');
-        }
-        return; // frames of an image are reported once, as a whole
-      }
       const firstAt = new Map<number, number>();
       frames.forEach((frame, index) => {
         const timeMs = countOf(objectOf(frame).timeMs);
@@ -121,7 +135,7 @@ const Media = z
         } else {
           firstAt.set(timeMs, index);
         }
-        if (typeof duration === "number" && timeMs > duration) {
+        if (duration !== undefined && timeMs > duration) {
           addRuleIssue(
             ctx,
             ["frames", index, "timeMs"],
@@ -232,19 +246,27 @@ export const ReferenceSchema = z
   );
 
 /** What the pins need to know about a media item with a well-formed id. */
-type MediaFacts = { kind: string | undefined; frameTimes: Set<number> };
+type MediaFacts = {
+  kind: "image" | "page" | "video" | undefined;
+  frameTimes: Set<number>;
+  /** Every frame has a well-formed time, so a time that is not in the set is really missing. */
+  framesComplete: boolean;
+};
 
-function checkMedia(
-  refId: string,
-  reference: Loose,
-  ctx: z.RefinementCtx,
-): Map<string, MediaFacts> {
+/** The media items by id, and whether every item has a well-formed id (else a missing id may just be malformed). */
+type MediaIndex = { byId: Map<string, MediaFacts>; complete: boolean };
+
+function checkMedia(refId: string, reference: Loose, ctx: z.RefinementCtx): MediaIndex {
   const byId = new Map<string, MediaFacts>();
+  let complete = true;
   const idIsValid = isRefId(refId);
   listOf(reference.media).forEach((raw, index) => {
     const media = objectOf(raw);
     const id = stringOf(media.id);
-    if (id === undefined || !MEDIA_ID.test(id)) return;
+    if (id === undefined || !MEDIA_ID.test(id)) {
+      complete = false;
+      return;
+    }
     if (byId.has(id)) {
       addRuleIssue(
         ctx,
@@ -255,11 +277,12 @@ function checkMedia(
       return;
     }
     const frames = listOf(media.frames);
+    const times = frames.map((frame) => countOf(objectOf(frame).timeMs));
+    const kind = stringOf(media.kind);
     byId.set(id, {
-      kind: stringOf(media.kind),
-      frameTimes: new Set(
-        frames.map((frame) => countOf(objectOf(frame).timeMs)).filter((t) => t !== undefined),
-      ),
+      kind: kind === "image" || kind === "page" || kind === "video" ? kind : undefined,
+      frameTimes: new Set(times.filter((t) => t !== undefined)),
+      framesComplete: times.every((t) => t !== undefined),
     });
 
     // The expected names are built from the ids, so a malformed id or path is reported once, by
@@ -267,7 +290,12 @@ function checkMedia(
     if (!idIsValid) return;
     const type = stringOf(media.type);
     const file = stringOf(media.file);
-    if (type !== undefined && type in EXTENSION && file !== undefined && MEDIA_PATH.test(file)) {
+    if (
+      type !== undefined &&
+      Object.hasOwn(EXTENSION, type) &&
+      file !== undefined &&
+      MEDIA_PATH.test(file)
+    ) {
       const expected = `${refId}/${id}.${EXTENSION[type as keyof typeof EXTENSION]}`;
       if (file !== expected) {
         addRuleIssue(
@@ -302,14 +330,10 @@ function checkMedia(
       }
     });
   });
-  return byId;
+  return { byId, complete };
 }
 
-function checkPins(
-  reference: Loose,
-  media: Map<string, MediaFacts> | undefined,
-  ctx: z.RefinementCtx,
-): void {
+function checkPins(reference: Loose, media: MediaIndex | undefined, ctx: z.RefinementCtx): void {
   const seen = new Set<string>();
   listOf(reference.pins).forEach((raw, index) => {
     const pin = objectOf(raw);
@@ -329,8 +353,9 @@ function checkPins(
     const mediaId = stringOf(pin.mediaId);
     if (mediaId === undefined || !MEDIA_ID.test(mediaId)) return;
     if (media === undefined) return; // media is not a list: reported by its own rule
-    const target = media.get(mediaId);
+    const target = media.byId.get(mediaId);
     if (target === undefined) {
+      if (!media.complete) return; // the item may be there with a malformed id
       addRuleIssue(
         ctx,
         ["pins", index, "mediaId"],
@@ -343,6 +368,9 @@ function checkPins(
     if (frameMs !== null && countOf(frameMs) === undefined) return; // reported by its own rule
     if (frameMs === undefined) return;
     if (target.kind === "video") {
+      if (frameMs !== null && !target.framesComplete && !target.frameTimes.has(frameMs as number)) {
+        return; // the frame may be there with a malformed time
+      }
       if (frameMs === null || !target.frameTimes.has(frameMs as number)) {
         addRuleIssue(
           ctx,
@@ -363,12 +391,14 @@ function checkPins(
 }
 
 function checkInterpretations(reference: Loose, ctx: z.RefinementCtx): void {
-  const pieces = new Set(["p0"]);
-  for (const raw of listOf(reference.pins)) {
-    const id = stringOf(objectOf(raw).id);
-    if (id !== undefined) pieces.add(id);
-  }
   if (!Array.isArray(reference.pins)) return;
+  const pieces = new Set(["p0"]);
+  for (const raw of reference.pins) {
+    const id = stringOf(objectOf(raw).id);
+    // A pin whose id is malformed may be the one the key means: reported by its own rule.
+    if (id === undefined || !PIN_ID.test(id)) return;
+    pieces.add(id);
+  }
   for (const key of Object.keys(objectOf(reference.interpretations))) {
     if (PIECE_ID.test(key) && !pieces.has(key)) {
       addRuleIssue(

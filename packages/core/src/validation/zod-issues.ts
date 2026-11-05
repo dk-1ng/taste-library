@@ -20,6 +20,14 @@ type Segment = string | number | symbol;
 
 const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
+/** Writes every control character (U+0000–U+001F, U+007F–U+009F) as a `\uXXXX` escape, so data never reaches a terminal raw. */
+function escapeControl(text: string): string {
+  return text.replace(
+    /\p{Cc}/gu,
+    (c) => `\\u${(c.codePointAt(0) as number).toString(16).padStart(4, "0")}`,
+  );
+}
+
 /** `pins[0].region.w` for a path; `the file` for the root. */
 export function describePath(path: readonly Segment[]): string {
   if (path.length === 0) return "the file";
@@ -28,7 +36,7 @@ export function describePath(path: readonly Segment[]): string {
     if (typeof segment === "number") out += `[${segment}]`;
     else if (IDENTIFIER.test(String(segment)))
       out += out === "" ? String(segment) : `.${String(segment)}`;
-    else out += `[${JSON.stringify(String(segment))}]`;
+    else out += `[${escapeControl(JSON.stringify(String(segment)))}]`;
   }
   return out;
 }
@@ -61,6 +69,7 @@ function genericMessage(issue: z.core.$ZodIssue): string {
       return `must be ${TYPE_NAMES[issue.expected] ?? issue.expected}.`;
     }
     case "invalid_value":
+      if (issue.input === undefined) return "is required.";
       return issue.values.length === 1
         ? `must be ${quoted(issue.values)}.`
         : `must be one of ${quoted(issue.values)}.`;

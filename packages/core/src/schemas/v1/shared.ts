@@ -139,7 +139,14 @@ export const TagList: z.ZodType<string[]> = z
 
 /** An integer from `min` to `max` (default: the largest safe integer, 2^53 − 1; format-spec §3.2). */
 export function integer(min: number, max: number = Number.MAX_SAFE_INTEGER): z.ZodType<number> {
-  return z.number().int().min(min).max(max);
+  // Not `.int()`: its issue stops the checks of every object above it (zod marks it as aborting).
+  return z
+    .number()
+    .min(min)
+    .max(max)
+    .superRefine((value, ctx) => {
+      if (!Number.isInteger(value)) addRuleIssue(ctx, [], "must be an integer.");
+    });
 }
 
 /** A string that must match a pattern; one custom issue with the given message. */
@@ -348,11 +355,10 @@ export function authored<T extends z.ZodType>(
         if (status === "corrected" && value.correction === null) {
           addRuleIssue(ctx, ["correction"], 'must not be null when status is "corrected".');
         } else if (
+          (isObject(value.correction) || typeof value.correction === "string") &&
           status !== undefined &&
           REVIEW_STATUS.includes(status as (typeof REVIEW_STATUS)[number]) &&
-          status !== "corrected" &&
-          value.correction !== null &&
-          value.correction !== undefined
+          status !== "corrected"
         ) {
           addRuleIssue(ctx, ["correction"], 'must be null unless status is "corrected".');
         }

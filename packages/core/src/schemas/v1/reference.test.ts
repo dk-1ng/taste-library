@@ -804,7 +804,7 @@ describe("reference: pins", () => {
   it("does not put control characters from the data into a message", () => {
     const found = broken((r) => (r.pins[0].mediaId = "\u001b]0;x\u0007"));
     expect(found.every((f) => !f.message.includes("\u001b"))).toBe(true);
-    const link = broken((r) => (r.interpretations["p9"] = structuredClone(r.interpretations.p0)));
+    const link = broken((r) => (r.interpretations.p9 = structuredClone(r.interpretations.p0)));
     expect(link[0]?.message).toContain('"p9"');
   });
 });
@@ -1059,5 +1059,100 @@ describe("reference: rules across fields next to type errors", () => {
       "/interpretations/p0/proposedBy",
       "/interpretations/p0/reviewedAt",
     ]);
+  });
+});
+
+describe("reference: a malformed value is reported once", () => {
+  it("a non-integer number does not hide the rules across fields", () => {
+    const found = broken((r) => {
+      r.media.push({ ...r.media[0] });
+      r.media[0].width = 1.5;
+      r.pins[0].mediaId = "m9";
+      r.lastIssued.pin = 0.5;
+    });
+    expect(found.map((f) => `${f.code} ${f.pointer}`).sort()).toEqual([
+      "broken-local-link /pins/0/mediaId",
+      "duplicate-id /media/1/id",
+      "schema-violation /lastIssued/pin",
+      "schema-violation /media/0/width",
+    ]);
+  });
+
+  it("a type that is only an inherited property name is just an invalid option", () => {
+    for (const type of ["toString", "constructor", "__proto__"]) {
+      const found = broken((r) => (r.media[0].type = type));
+      expect(found.map((f) => f.pointer)).toEqual(["/media/0/type"]);
+    }
+  });
+
+  it("a malformed durationMs does not cascade to the frames or the kind rule", () => {
+    const withVideo = (duration: number) => {
+      const r = example();
+      r.media.push({ ...video(), durationMs: duration });
+      r.lastIssued.media = 2;
+      return validate(r).map((f) => f.pointer);
+    };
+    expect(withVideo(-5)).toEqual(["/media/1/durationMs"]);
+    expect(withVideo(0)).toEqual(["/media/1/durationMs"]);
+    expect(broken((r) => (r.media[0].durationMs = -5)).map((f) => f.pointer)).toEqual([
+      "/media/0/durationMs",
+    ]);
+  });
+
+  it("a malformed kind does not make pins fail as if the media were an image", () => {
+    const r = example();
+    r.media.push({ ...video(), kind: "Video" });
+    r.lastIssued.media = 2;
+    r.pins.push({ ...r.pins[0], id: "p2", mediaId: "m2", frameMs: 0 });
+    r.lastIssued.pin = 2;
+    expect(validate(r).map((f) => f.pointer)).toEqual(["/media/1/kind"]);
+  });
+
+  it("a malformed id does not make the links to it fail", () => {
+    const r1 = example();
+    r1.media.push({ ...video(), id: "M2" });
+    r1.lastIssued.media = 2;
+    r1.pins.push({ ...r1.pins[0], id: "p2", mediaId: "m2", frameMs: 0 });
+    r1.lastIssued.pin = 2;
+    expect(validate(r1).map((f) => f.pointer)).toEqual(["/media/1/id"]);
+
+    const r2 = example();
+    const v = video();
+    v.frames[1].timeMs = "1500";
+    r2.media.push(v);
+    r2.lastIssued.media = 2;
+    r2.pins.push({ ...r2.pins[0], id: "p2", mediaId: "m2", frameMs: 1500 });
+    r2.lastIssued.pin = 2;
+    expect(validate(r2).map((f) => f.pointer)).toEqual(["/media/1/frames/1/timeMs"]);
+
+    const r3 = example();
+    r3.pins[0].id = "P1";
+    r3.interpretations.p1 = structuredClone(r3.interpretations.p0);
+    expect(validate(r3).map((f) => f.pointer)).toEqual(["/pins/0/id"]);
+  });
+
+  it("a malformed correction is reported once", () => {
+    const found = broken((r) => (r.interpretations.p0.correction = 5));
+    expect(found.map((f) => f.pointer)).toEqual(["/interpretations/p0/correction"]);
+  });
+
+  it("frames of an image are not parsed, even malformed ones", () => {
+    const found = broken((r) => (r.media[0].frames = [{ timeMs: 0 }, {}]));
+    expect(found.map((f) => f.pointer)).toEqual(["/media/0/frames"]);
+  });
+
+  it("control characters of any kind never reach a message", () => {
+    for (const key of ["\u009b2J", "x\u007fy", "\u001b[2J"]) {
+      const found = broken((r) => (r[key] = 1));
+      expect(found).toHaveLength(1);
+      // biome-ignore lint/suspicious/noControlCharactersInRegex: that is what is tested.
+      expect(/[\u0000-\u001f\u007f-\u009f]/.test(found[0]?.message ?? "")).toBe(false);
+    }
+  });
+
+  it("a missing field with a fixed set of values is required, not wrong", () => {
+    const found = broken((r) => delete r.media[0].kind);
+    expect(found.map((f) => f.message)).toEqual(["media[0].kind: is required."]);
+    expect(broken((r) => delete r.formatVersion)[0]?.message).toBe("formatVersion: is required.");
   });
 });
