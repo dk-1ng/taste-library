@@ -617,20 +617,14 @@ describe("refusals", () => {
   it("lists the issues sorted by file, pointer and code", async () => {
     await withGoldenCopy(async (dir) => {
       const library = await open(dir);
-      const result = await library.write(
-        (snapshot) => {
-          const family = structuredClone(
-            snapshot.files.get("families/quiet-editorial.json")?.value,
-          ) as Json;
-          family.members = "x";
-          return { changes: [{ path: "families/other-name.json", next: family }], skipped: [] };
-        },
-        { clock },
-      );
+      const result = await edit(library, "families/quiet-editorial.json", (family) => {
+        family.members = "x";
+        family.updatedAt = "x";
+      });
       if (result.status !== "refused") throw new Error("not refused");
       expect(result.issues.map((i) => [i.pointer, i.code])).toEqual([
         ["/members", "schema-violation"],
-        ["/slug", "name-mismatch"],
+        ["/updatedAt", "schema-violation"],
       ]);
     });
   });
