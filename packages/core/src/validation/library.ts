@@ -40,6 +40,8 @@ export interface Snapshot {
   files: ReadonlyMap<string, SnapshotFile>;
   /** Every issue of the library, sorted as in format-spec §16.3; media issues are separate (`checkMedia`). */
   issues: readonly Issue[];
+  /** Folders (relative paths) that exist but could not be listed: a link into one is unresolved, not dangling. */
+  unlistedFolders: readonly string[];
 }
 
 function compareText(a: string, b: string): number {
@@ -103,6 +105,7 @@ export function buildSnapshot(
     formatVersion: files.get("library.json")?.formatVersion ?? null,
     files,
     issues: sortIssues(issues),
+    unlistedFolders,
   };
 }
 

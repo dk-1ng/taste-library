@@ -18,6 +18,7 @@ import {
 } from "../validation/library.js";
 import { mapLimit } from "./map-limit.js";
 import { readLibraryFileBytes } from "./read-file.js";
+import { type Build, type LibraryWriteOptions, runWrite, type WriteResult } from "./write.js";
 
 /**
  * Opening a library: listing its folders and reading its files (docs/design.md section 4,
@@ -53,6 +54,12 @@ export interface Library {
    * unchanged files by their fingerprints arrives with the index (#36).
    */
   snapshot(): Promise<SnapshotResult>;
+  /**
+   * Writes one library file through the pipeline (docs/design.md section 4, "Writing library
+   * files"): `build` receives the fresh, gated snapshot and returns the plan. Writes through one
+   * handle run one at a time, in order; across processes the optimistic check decides.
+   */
+  write(build: Build, options?: LibraryWriteOptions): Promise<WriteResult>;
 }
 
 export type OpenResult = { ok: true; library: Library } | OpenFailure;
@@ -250,16 +257,25 @@ export async function openLibrary(root: string, options: OpenOptions = {}): Prom
   const first = await load(root, registry, sha256, list);
   if (!first.ok) return first;
   let pending: SnapshotResult | null = first;
+  const snapshot = async (): Promise<SnapshotResult> => {
+    if (pending !== null) {
+      const result = pending;
+      pending = null;
+      return result;
+    }
+    return load(root, registry, sha256, list);
+  };
+  let queue: Promise<unknown> = Promise.resolve();
   return {
     ok: true,
     library: {
-      async snapshot() {
-        if (pending !== null) {
-          const result = pending;
-          pending = null;
-          return result;
-        }
-        return load(root, registry, sha256, list);
+      snapshot,
+      write(build, writeOptions) {
+        const run = queue.then(() =>
+          runWrite({ root, registry, sha256, snapshot }, build, writeOptions),
+        );
+        queue = run.catch(() => undefined);
+        return run;
       },
     },
   };

@@ -8,7 +8,7 @@ export type {
   LibraryFileKind,
   SchemaSet,
 } from "./format.js";
-export { classifyEntry, CURRENT_FORMAT_VERSION, currentLayout, FORMAT_REGISTRY } from "./format.js";
+export { CURRENT_FORMAT_VERSION, classifyEntry, currentLayout, FORMAT_REGISTRY } from "./format.js";
 export type { IdOptions, RandomSource, RefIdOptions } from "./ids/random.js";
 export {
   newGuardrailId,
@@ -27,6 +27,7 @@ export { canonicalIssue, canonicalize, isCanonical, serialize } from "./json/can
 export type { ReadFailed, ReadOk, ReadResult } from "./json/read.js";
 export { escapePointerToken, MAX_NESTING, readLibraryJson } from "./json/read.js";
 export { roundAxis, roundRegion } from "./model/region.js";
+export { differsBesidesUpdatedAt, laterOf, stampFile } from "./model/timestamps.js";
 export { type Directions, DirectionsSchema } from "./schemas/v1/directions.js";
 export { type Family, FamilySchema } from "./schemas/v1/family.js";
 export { type Glossary, GlossarySchema } from "./schemas/v1/glossary.js";
@@ -37,13 +38,12 @@ export { type Project, ProjectSchema } from "./schemas/v1/project.js";
 export { type Reference, ReferenceSchema } from "./schemas/v1/reference.js";
 export * as v1Shared from "./schemas/v1/shared.js";
 export { type TasteProfile, TasteProfileSchema } from "./schemas/v1/taste-profile.js";
-export type { CrossFile, CrossOptions } from "./validation/cross.js";
+export type { CrossFile, CrossOptions, LinkEvent } from "./validation/cross.js";
 export { crossFileIssues } from "./validation/cross.js";
 export type { FileCheck, FileStatus } from "./validation/file.js";
 export { checkLibraryFile } from "./validation/file.js";
 export type { Issue, IssueCode, Severity } from "./validation/issue.js";
 export { ISSUE_SEVERITY, makeIssue } from "./validation/issue.js";
-export { describePath, issuesFromZod, pointerOf, validateValue } from "./validation/zod-issues.js";
 export type { EntryRead, LibraryEntry, Snapshot, SnapshotFile } from "./validation/library.js";
 export { buildSnapshot, reportOf } from "./validation/library.js";
 export type { Report } from "./validation/report.js";
@@ -55,3 +55,4 @@ export {
   REPORT_VERSION,
   sortIssues,
 } from "./validation/report.js";
+export { describePath, issuesFromZod, pointerOf, validateValue } from "./validation/zod-issues.js";

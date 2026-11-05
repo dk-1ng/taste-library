@@ -66,7 +66,8 @@ export function checkLibraryFile(
   const issues = validateValue(spec.schemas[kind], read.value, path);
 
   const identity = spec.layout.identityOf(path, kind);
-  if (identity !== null) {
+  // A value that is not an object (`null`, a number) has no identity field; the schema reports it.
+  if (identity !== null && typeof read.value === "object" && read.value !== null) {
     const pointer = `/${escapePointerToken(identity.field)}`;
     const given = (read.value as Record<string, unknown>)[identity.field];
     // A value that breaks its own rule is reported by that rule, not again as a name mismatch.

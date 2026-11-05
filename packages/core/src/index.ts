@@ -13,6 +13,18 @@ export {
   resolveConfigPath,
   writeConfig,
 } from "./node/config.js";
+export { checkMedia, type MediaCheckOptions } from "./node/media.js";
+export { mediaPathSegments, type ResolvedMedia, resolveMediaPath } from "./node/media-path.js";
+export type {
+  Library as OpenLibrary,
+  OpenFailure,
+  OpenOptions,
+  OpenResult,
+  SnapshotResult,
+} from "./node/open.js";
+export { openLibrary } from "./node/open.js";
+export type { FileBytes } from "./node/read-file.js";
+export { MAX_JSON_BYTES, readLibraryFileBytes } from "./node/read-file.js";
 export {
   type Expected,
   type FileSystem,
@@ -22,15 +34,14 @@ export {
   type WriteOptions,
   type WriteOutcome,
 } from "./node/replace-file.js";
-export type { FileBytes } from "./node/read-file.js";
-export { MAX_JSON_BYTES, readLibraryFileBytes } from "./node/read-file.js";
-export type {
-  Library as OpenLibrary,
-  OpenFailure,
-  OpenOptions,
-  OpenResult,
-  SnapshotResult,
-} from "./node/open.js";
-export { openLibrary } from "./node/open.js";
-export { checkMedia, type MediaCheckOptions } from "./node/media.js";
-export { mediaPathSegments, type ResolvedMedia, resolveMediaPath } from "./node/media-path.js";
+export {
+  type Build,
+  type FileChange,
+  kindOfPath,
+  type LibraryWriteOptions,
+  type Notice,
+  type Plan,
+  type Skipped,
+  type WriteFailure,
+  type WriteResult,
+} from "./node/write.js";
