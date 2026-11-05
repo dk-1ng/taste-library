@@ -1,4 +1,4 @@
-# Normalize all text files to LF in the repository and in working trees (Windows and Linux alike).
+# Normalize all text files to LF in the repository and in working trees (on every platform).
 * text=auto eol=lf
 
 # Binary files: never touch line endings, never diff as text.
