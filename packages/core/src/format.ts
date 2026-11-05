@@ -14,7 +14,7 @@ import type { Issue } from "./validation/issue.js";
 /** The type of a file in the library folder (the media marker lives in the media folder). */
 export type LibraryFileKind = Exclude<FileType, "marker">;
 
-export type SchemaSet = Readonly<Record<LibraryFileKind, z.ZodType>>;
+export type SchemaSet = Readonly<Record<FileType, z.ZodType>>;
 
 /** Where each kind of file sits (format-spec §5). */
 export interface FormatLayout {

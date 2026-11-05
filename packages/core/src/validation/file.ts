@@ -21,7 +21,7 @@ export interface FileCheck {
   issues: Issue[];
 }
 
-function versionOf(value: unknown): number | null {
+export function versionOf(value: unknown): number | null {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
   const version = (value as { formatVersion?: unknown }).formatVersion;
   return typeof version === "number" && Number.isSafeInteger(version) && version >= 1
