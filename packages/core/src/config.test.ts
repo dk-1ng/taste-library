@@ -68,6 +68,15 @@ describe("readConfig and writeConfig", () => {
     });
   });
 
+  it("stores an NFD-spelled path exactly as given", async () => {
+    await withTempDir(async (dir) => {
+      const file = join(dir, "config.json");
+      const mediaPath = join(dir, "m\u00eddia".normalize("NFD"));
+      await writeConfig(file, { version: 1, mediaPath });
+      expect((await readConfig(file)).mediaPath).toBe(mediaPath);
+    });
+  });
+
   it("returns the defaults when the file does not exist", async () => {
     await withTempDir(async (dir) => {
       expect(await readConfig(join(dir, "missing.json"))).toEqual({ version: 1 });

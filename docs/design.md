@@ -98,7 +98,7 @@ Each edge is both a `workspace:*` dependency and a TypeScript project reference.
 - Biome is limited to code and data files (`.ts`, `.tsx`, `.js`, `.mjs`, `.json`), listed in `biome.json`. Markdown and YAML are not touched: it would reflow tables and prose in the design documents. It honors `.gitignore`.
 - `pnpm typecheck` is `tsc -b`. `pnpm test` runs each package's `test` script when it has one (`pnpm -r --if-present test`); the test layout is in §15.
 - `pnpm install` runs `prepare`, which runs `scripts/setup-hooks.mjs`: it sets `core.hooksPath` to `.githooks` in a Git checkout and does nothing elsewhere. New clones get the hooks without a manual step.
-- CI runs `pnpm check`, then the end-to-end tests (`pnpm test:e2e:install`, `pnpm test:e2e`), on `ubuntu-latest` and `windows-latest` with the Node version from `.nvmrc` and the pnpm version from `packageManager`. The pnpm store is cached through `pnpm/action-setup` (`cache: true`); actions are pinned to full commit SHAs and `zizmor` audits the workflows.
+- CI runs `pnpm check`, then the end-to-end tests (`pnpm test:e2e:install`, `pnpm test:e2e`), on `ubuntu-latest`, `windows-latest` and `macos-latest` with the Node version from `.nvmrc` and the pnpm version from `packageManager`. The pnpm store is cached through `pnpm/action-setup` (`cache: true`); actions are pinned to full commit SHAs and `zizmor` audits the workflows.
 - Dependabot watches the npm ecosystem weekly with a 7-day cooldown, groups development dependencies into one PR and uses the `chore(deps)` prefix.
 
 
@@ -214,7 +214,7 @@ The interface language is a per-machine setting (§4). The library's `language` 
 - Text files use LF (`.gitattributes`); the tool reads either line ending.
 - Library files are UTF-8 without a BOM, LF, in a canonical JSON form (format-spec §3), so the same data gives the same bytes on every system.
 - File names inside a library and a media folder come only from identifiers (ASCII, lowercase, never a Windows reserved name), so they behave the same on case-insensitive file systems and never depend on Unicode normalization. Only the folders the user chooses may have non-ASCII names.
-- Paths with non-ASCII characters (for example `Usuário`) are tested in CI. macOS file systems may return such a name in a different Unicode normalization (NFD) than the one passed in, so code compares and stores paths as given and never assumes a listed name equals the typed one byte for byte.
+- Paths with non-ASCII characters (for example `Usuário`) are tested in CI. macOS file systems may return such a name in a different Unicode normalization (NFD) than the one passed in, so a path the user gave is stored verbatim, and when a name from a directory listing is matched against a given one, both are compared after `normalize("NFC")`; equality of the raw strings is never assumed.
 
 ## 14. Security
 

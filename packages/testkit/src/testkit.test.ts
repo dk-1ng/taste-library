@@ -80,7 +80,8 @@ describe("temporary directory", () => {
       // elsewhere the two names are different files. Neither outcome may corrupt the data.
       const other = listed === nfc ? nfd : nfc;
       const viaOther = await readFile(join(dir, other, "nota.txt"), "utf8").catch(() => null);
-      expect([null, "x"]).toContain(viaOther);
+      // APFS (macOS) folds the two forms; Linux and Windows keep them apart.
+      expect(viaOther).toBe(process.platform === "darwin" ? "x" : null);
     });
   });
 });
