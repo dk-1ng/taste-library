@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { crashAtCall, recordPoints, SimulatedCrash } from "../../test/support/crash.js";
@@ -111,6 +111,15 @@ async function filesOf(kind: Kind): Promise<string[]> {
 function changedFiles(before: Record<string, string>, after: Record<string, string>): string[] {
   const paths = new Set([...Object.keys(before), ...Object.keys(after)]);
   return [...paths].filter((path) => !path.endsWith("/") && before[path] !== after[path]).sort();
+}
+
+/** Runs the deletion again on `dir` and checks that it finishes: no issue and no link left. */
+async function expectFinishesAgain(dir: string, kind: Kind, label: string): Promise<void> {
+  const again = await (await open(dir)).write(kind.plan, { clock });
+  expect(again.status, label).toBe("written");
+  expect(await issuesOnDisk(dir), label).toEqual([]);
+  expect((await linksOnDisk(dir)).filter(kind.gone), label).toEqual([]);
+  expect(temporaryFiles(await tree(dir)), label).toEqual([]);
 }
 
 /** `after` holds only values found in `before`, each at most as often. */
@@ -228,6 +237,10 @@ describe("a deletion stopped by a conflict or an I/O error", () => {
           });
           expect(beyondDangling(await issuesOnDisk(dir)), path).toEqual([]);
           expect(temporaryFiles(await tree(dir))).toEqual([]);
+
+          // Once the migration is over, running the deletion again finishes it.
+          await rm(join(dir, ".tastelib", "migration-backup"), { recursive: true });
+          await expectFinishesAgain(dir, kind, path);
         });
 
         // The rename or removal of this file fails.
@@ -255,6 +268,9 @@ describe("a deletion stopped by a conflict or an I/O error", () => {
           });
           expect(beyondDangling(await issuesOnDisk(dir)), path).toEqual([]);
           expect(temporaryFiles(await tree(dir))).toEqual([]);
+
+          // Without the fault, running the deletion again finishes it.
+          await expectFinishesAgain(dir, kind, path);
         });
       }
     }, 60_000);
