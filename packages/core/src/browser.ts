@@ -1,5 +1,13 @@
 // @tastelib/core/browser: pure modules only; nothing here touches the operating system.
 
+export type { FileType, FileValue } from "./canonical/canonical.js";
+export {
+  canonicalize,
+  isCanonical,
+  roundAxis,
+  roundRegion,
+  serialize,
+} from "./canonical/canonical.js";
 export type { ReadFailed, ReadOk, ReadResult } from "./json/read.js";
 export { escapePointerToken, MAX_NESTING, readLibraryJson } from "./json/read.js";
 export { type Directions, DirectionsSchema } from "./schemas/v1/directions.js";
