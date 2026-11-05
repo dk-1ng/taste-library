@@ -6,7 +6,7 @@ Uma biblioteca de gosto em design, local, para quem desenvolve com agentes de IA
 
 [English](../../README.md)
 
-> **Situação:** início do desenvolvimento. Ainda não há nada para instalar.
+> **Situação:** início do desenvolvimento, público para que o trabalho possa ser acompanhado. Ainda não há nada para instalar, não há licença (todos os direitos reservados até a primeira versão) e contribuições externas ainda não são aceitas.
 
 ## Para que serve
 
@@ -30,4 +30,4 @@ Veja o [CONTRIBUTING.md](../../CONTRIBUTING.md). Para relatar uma vulnerabilidad
 
 ## Licença
 
-Ainda não foi escolhida; será definida antes da primeira versão pública.
+Ainda não há: todos os direitos ficam reservados até que uma licença seja escolhida, antes da primeira versão.

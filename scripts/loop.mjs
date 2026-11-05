@@ -117,12 +117,19 @@ function branchFor(number) {
   return null;
 }
 
+/** The pull request that belongs to the maintainer: opened from this repository by
+ * the owner. `gh pr list --head` matches by branch name only, so on a public repository
+ * it also returns pull requests from forks, which must never be taken for ours. */
+export function ownPullRequest(prs) {
+  return prs.find((pr) => pr.isCrossRepository === false && pr.author?.login === OWNER) ?? null;
+}
+
 function prFor(branch) {
   const prs = ghJson(
     ...["pr", "list", "--repo", REPO, "--head", branch, "--state", "open"],
-    ...["--json", "number,url,title"],
+    ...["--json", "number,url,title,isCrossRepository,author"],
   );
-  return prs[0] ?? null;
+  return ownPullRequest(prs);
 }
 
 /** The newest comment by the maintainer. Comments by anyone else are ignored:

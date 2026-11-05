@@ -83,13 +83,13 @@ When the maintainer says "continue":
 
 ## Protection of `main`
 
-The repository is public (docs/design.md §16), so GitHub enforces the main layer, with two local layers as defense in depth:
+The repository is public from #73 (docs/design.md §16), so GitHub enforces the main layer, with two local layers as defense in depth:
 
 1. **Ruleset on `main` (GitHub):** a pull request is required, the CI checks (`Policy (trailers, media)`, `Check (linux|windows|macos)`, `Workflow tooling (linux|windows|macos)`, `Workflow audit (zizmor)`) must pass, squash merge only, no force push, no deletion, no bypass.
 2. `.claude/settings.json` denies pushes to `main` and force pushes, and asks before merges and publishing.
 3. `.githooks/pre-push` refuses pushes to `main` and non-fast-forward pushes. Enable it once per clone: `git config core.hooksPath .githooks` (`scripts/loop.mjs status` warns when it is off).
 
-The loop merges only after the PR's CI is green (step 8). Never work around a layer; if one blocks you, stop and tell the maintainer. A GitHub capacity outage on a macOS runner is handled by switching the repository variable `MACOS_RUNNER` to `macos-15-intel` and re-running, not by merging without macOS; an exception needs the maintainer's explicit decision and an issue that tracks the debt.
+The loop merges only after the PR's CI is green (step 8). Never work around a layer; if one blocks you, stop and tell the maintainer. A GitHub capacity outage on a macOS runner is handled by switching the repository variable `MACOS_RUNNER` to `macos-15-intel` and re-running, not by merging without macOS; an exception needs the maintainer's explicit decision, an issue that tracks the debt, and the maintainer changing the ruleset for that one pull request and restoring it afterwards (agents never change repository settings).
 
 ## Rules of the road
 

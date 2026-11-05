@@ -2,7 +2,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { main, pickNext } from "./loop.mjs";
+import { main, ownPullRequest, pickNext } from "./loop.mjs";
 
 function issue(number, milestone = null, ...labels) {
   return {
@@ -103,4 +103,13 @@ test("--help exits with 0", () => {
   } finally {
     console.log = originalLog;
   }
+});
+
+test("a pull request from a fork or by someone else is never taken for the maintainer's own", () => {
+  const own = { number: 5, isCrossRepository: false, author: { login: "dk-1ng" } };
+  const fork = { number: 6, isCrossRepository: true, author: { login: "dk-1ng" } };
+  const stranger = { number: 7, isCrossRepository: false, author: { login: "someone" } };
+  assert.equal(ownPullRequest([fork, stranger]), null);
+  assert.equal(ownPullRequest([fork, stranger, own]), own);
+  assert.equal(ownPullRequest([]), null);
 });
