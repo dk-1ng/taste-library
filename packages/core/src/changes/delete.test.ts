@@ -113,6 +113,14 @@ describe("deleting a reference", () => {
     expect(other.skipped).toEqual([]);
   });
 
+  it("still names its own file for deletion when that file has errors, without blocking", () => {
+    // The pipeline refuses the deletion with that file's issues (layer 2); the plan does not hide it.
+    const snapshot = goldenSnapshot((files) => files.set(REF_A, "{ broken"));
+    const plan = planReferenceDeletion(snapshot, A);
+    expect(plan.changes[0]).toEqual({ path: REF_A, next: null });
+    expect(plan.blockedBy).toBeUndefined();
+  });
+
   it("is blocked by its own file when its folder could not be listed", () => {
     const plan = planReferenceDeletion(goldenSnapshot(undefined, { unlisted: ["references"] }), A);
     expect(plan.blockedBy).toEqual([REF_A]);
@@ -136,6 +144,13 @@ describe("deleting a family", () => {
     expect(paths(plan)).toEqual([FAMILY, DIRECTIONS]);
     expect(next(plan, DIRECTIONS).directions[0].family).toBeNull();
     expect(next(plan, DIRECTIONS).directions[0].pieces).toHaveLength(2);
+  });
+
+  it("still names its own file for deletion when that file has errors, without blocking", () => {
+    const snapshot = goldenSnapshot((files) => files.set(FAMILY, "{ broken"));
+    const plan = planFamilyDeletion(snapshot, "quiet-editorial");
+    expect(plan.changes[0]).toEqual({ path: FAMILY, next: null });
+    expect(plan.blockedBy).toBeUndefined();
   });
 
   it("skips a projects folder that could not be listed", () => {

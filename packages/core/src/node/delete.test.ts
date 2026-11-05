@@ -306,6 +306,46 @@ describe("files with errors", () => {
     });
   });
 
+  const BROKEN_OWN_FILE: { name: string; path: string; plan: (snapshot: Snapshot) => Plan }[] = [
+    {
+      name: "a reference whose file",
+      path: REF_A,
+      plan: (snapshot) => planReferenceDeletion(snapshot, A),
+    },
+    {
+      name: "a family whose file",
+      path: "families/quiet-editorial.json",
+      plan: (snapshot) => planFamilyDeletion(snapshot, "quiet-editorial"),
+    },
+    {
+      name: "a pin whose reference",
+      path: REF_A,
+      plan: (snapshot) => planPinDeletion(snapshot, A, "p1"),
+    },
+  ];
+
+  for (const broken of BROKEN_OWN_FILE) {
+    it(`refuses to delete ${broken.name} has errors, removing no link`, async () => {
+      await withGoldenCopy(async (dir) => {
+        await writeFile(join(dir, ...broken.path.split("/")), "{ broken");
+        const library = await open(dir);
+        const snapshot = await library.snapshot();
+        if (!snapshot.ok) throw new Error(snapshot.message);
+        const own = snapshot.snapshot.files.get(broken.path)?.issues ?? [];
+        expect(own.map((issue) => issue.code)).toEqual(["invalid-json"]);
+        // Without the refusal, the deletion would remove links from other files.
+        expect(broken.plan(snapshot.snapshot).changes.length).toBeGreaterThan(0);
+        const before = await tree(dir);
+
+        const result = await library.write(broken.plan, { clock });
+        expect(result).toMatchObject({ status: "refused", written: [], notWritten: [] });
+        if (result.status !== "refused") return;
+        expect(result.issues).toEqual(own);
+        expect(await tree(dir)).toEqual(before);
+      });
+    });
+  }
+
   it("refuses to delete an entry of a file that has errors, writing nothing", async () => {
     await withGoldenCopy(async (dir) => {
       await editJson(dir, "guardrails.json", (guardrails) => {
