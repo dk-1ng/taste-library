@@ -72,11 +72,15 @@ jobs:
           fi
 
   tooling:
-    name: Workflow tooling (${{ matrix.os }})
+    name: Workflow tooling (${{ matrix.name }})
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        include:
+          - { name: linux, os: ubuntu-latest }
+          - { name: windows, os: windows-latest }
+          # Switch the repository variable MACOS_RUNNER to macos-15-intel while GitHub lacks macOS arm64 runners.
+          - { name: macos, os: "${{ vars.MACOS_RUNNER || 'macos-latest' }}" }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -93,11 +97,15 @@ jobs:
         run: node --test scripts/
 
   check:
-    name: Check (${{ matrix.os }})
+    name: Check (${{ matrix.name }})
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        include:
+          - { name: linux, os: ubuntu-latest }
+          - { name: windows, os: windows-latest }
+          # Switch the repository variable MACOS_RUNNER to macos-15-intel while GitHub lacks macOS arm64 runners.
+          - { name: macos, os: "${{ vars.MACOS_RUNNER || 'macos-latest' }}" }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
