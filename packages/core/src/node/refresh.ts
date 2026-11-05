@@ -135,6 +135,19 @@ export function createRefresher(options: RefreshOptions): Refresher {
         cached.file.fingerprint === fingerprint ? cached.file : { ...cached.file, fingerprint };
       return { file, fingerprint, unsettled, brokenLink: null };
     }
+    // A file that still cannot be read, for the same reason and with the same fingerprint (or none,
+    // as when it cannot be opened), is unchanged: its entry is kept, so the snapshot can be too.
+    if (
+      read.status === "failed" &&
+      cached !== undefined &&
+      cached.brokenLink === null &&
+      cached.file.kind === listed.kind &&
+      cached.file.status === "unreadable" &&
+      cached.file.fingerprint === fingerprint &&
+      sameIssues(cached.file.issues, [read.issue])
+    ) {
+      return { file: cached.file, fingerprint, unsettled, brokenLink: null };
+    }
     const file = checkEntry(registry, {
       path: listed.path,
       kind: listed.kind,

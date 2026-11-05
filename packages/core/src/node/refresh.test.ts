@@ -5,6 +5,8 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { editJson, withGoldenCopy } from "../../test/support/golden.js";
 import { type Json, open, tree } from "../../test/support/library.js";
+import { expectMatchesRebuild } from "../../test/support/rebuild.js";
+import { makeIssue } from "../validation/issue.js";
 import type { Snapshot } from "../validation/library.js";
 import type { Library, OpenOptions } from "./open.js";
 import { readLibraryFileBytes } from "./read-file.js";
@@ -284,6 +286,48 @@ describe("the cache", () => {
       expect(counted.reads).toEqual([`references/${B}.json`]);
       expect(second).not.toBe(first);
       expect(second.files.get("glossary.json")).toBe(first.files.get("glossary.json"));
+    });
+  });
+
+  it("returns the same snapshot when a file still cannot be read", async () => {
+    await withGoldenCopy(async (dir) => {
+      // Injected, so it behaves the same on every system: the read fails without stats, as an
+      // EACCES on open or a path that is not a regular file does.
+      const readFileHook: OpenOptions["readFile"] = async (path, file) =>
+        file === "glossary.json"
+          ? {
+              status: "failed",
+              issue: makeIssue("unreadable-file", file, null, "The file cannot be read (EACCES)."),
+            }
+          : readLibraryFileBytes(path, file);
+      const library = await open(dir, undefined, { ...settled, readFile: readFileHook });
+      const first = await snap(library);
+      expect(first.files.get("glossary.json")?.status).toBe("unreadable");
+      expect(await snap(library)).toBe(first);
+      await expectMatchesRebuild(library, dir, { ...settled, readFile: readFileHook });
+    });
+  });
+
+  it("returns the same snapshot when an unsettled file is still too large", async () => {
+    await withGoldenCopy(async (dir) => {
+      const file = pathOf(dir, "glossary.json");
+      const stats = await stat(file, { bigint: true });
+      // Injected: the read reports the file too large, with the stats of its handle.
+      const readFileHook: OpenOptions["readFile"] = async (path, relative) =>
+        relative === "glossary.json"
+          ? {
+              status: "failed",
+              stats,
+              issue: makeIssue("file-too-large", relative, null, "Too large."),
+            }
+          : readLibraryFileBytes(path, relative);
+      // One second after its mtime: the file is unsettled, so every refresh reads it again.
+      const unsettled = { statClock: () => Number(stats.mtimeNs / 1_000_000n) + 1_000 };
+      const library = await open(dir, undefined, { ...unsettled, readFile: readFileHook });
+      const first = await snap(library);
+      expect(first.files.get("glossary.json")?.status).toBe("unreadable");
+      expect(await snap(library)).toBe(first);
+      await expectMatchesRebuild(library, dir, { ...unsettled, readFile: readFileHook });
     });
   });
 });
