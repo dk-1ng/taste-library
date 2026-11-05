@@ -1,0 +1,50 @@
+{
+  "formatVersion": 1,
+  "directions": [
+    {
+      "id": "d1",
+      "createdAt": "2026-11-03T11:00:00.000Z",
+      "updatedAt": "2026-11-03T11:00:00.000Z",
+      "family": "quiet-editorial",
+      "pieces": [
+        "ref-20261101-a1b2c3#p0",
+        "ref-20261103-g7h8j9#p0"
+      ],
+      "guardrails": [
+        "gr-3k7m2q"
+      ],
+      "plan": {
+        "origin": "user",
+        "content": {
+          "title": "Quiet and dense",
+          "why": "It fits a tool for people who read a lot."
+        },
+        "writtenAt": "2026-11-03T11:00:00.000Z"
+      }
+    },
+    {
+      "id": "d2",
+      "createdAt": "2026-11-03T12:00:00.000Z",
+      "updatedAt": "2026-11-03T12:00:00.000Z",
+      "family": null,
+      "pieces": [],
+      "guardrails": [],
+      "plan": {
+        "origin": "agent",
+        "proposedBy": "claude-code",
+        "proposedAt": "2026-11-03T12:00:00.000Z",
+        "inputSha256": null,
+        "proposal": {
+          "title": "Open pages",
+          "why": "Gives the text room to breathe."
+        },
+        "status": "to-review",
+        "correction": null,
+        "reviewedAt": null
+      }
+    }
+  ],
+  "lastIssued": {
+    "direction": 2
+  }
+}

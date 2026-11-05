@@ -1,0 +1,40 @@
+{
+  "formatVersion": 1,
+  "guardrails": [
+    {
+      "id": "gr-3k7m2q",
+      "createdAt": "2026-11-01T13:00:00.000Z",
+      "updatedAt": "2026-11-01T13:00:00.000Z",
+      "sources": [
+        "ref-20261101-a1b2c3#p2"
+      ],
+      "rule": {
+        "origin": "user",
+        "content": {
+          "text": "No full-width banners that compete with the content."
+        },
+        "writtenAt": "2026-11-01T13:00:00.000Z"
+      }
+    },
+    {
+      "id": "gr-8r5t1w",
+      "createdAt": "2026-11-03T12:00:00.000Z",
+      "updatedAt": "2026-11-03T12:00:00.000Z",
+      "sources": [
+        "ref-20261103-g7h8j9#p1"
+      ],
+      "rule": {
+        "origin": "agent",
+        "proposedBy": "claude-code",
+        "proposedAt": "2026-11-03T12:00:00.000Z",
+        "inputSha256": null,
+        "proposal": {
+          "text": "Rows must not move when the pointer passes over them."
+        },
+        "status": "to-review",
+        "correction": null,
+        "reviewedAt": null
+      }
+    }
+  ]
+}

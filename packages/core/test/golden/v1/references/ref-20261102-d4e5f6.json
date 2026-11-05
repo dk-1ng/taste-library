@@ -1,0 +1,32 @@
+{
+  "formatVersion": 1,
+  "id": "ref-20261102-d4e5f6",
+  "createdAt": "2026-11-02T12:00:00.000Z",
+  "updatedAt": "2026-11-02T12:00:00.000Z",
+  "source": {
+    "via": "file-picker",
+    "url": null
+  },
+  "result": null,
+  "media": [
+    {
+      "id": "m1",
+      "kind": "page",
+      "file": "ref-20261102-d4e5f6/m1.png",
+      "type": "image/png",
+      "bytes": 7812,
+      "sha256": "6df189c8532fa83cd288c672ca4986593a1932303e8ab2ebd69ce60bfe733689",
+      "width": 40,
+      "height": 64,
+      "durationMs": null,
+      "frames": []
+    }
+  ],
+  "note": "",
+  "pins": [],
+  "interpretations": {},
+  "lastIssued": {
+    "media": 1,
+    "pin": 0
+  }
+}

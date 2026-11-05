@@ -15,6 +15,12 @@ describe("the browser entry", () => {
       "isCanonical",
       "canonicalIssue",
       "roundRegion",
+      "FORMAT_REGISTRY",
+      "checkLibraryFile",
+      "crossFileIssues",
+      "buildSnapshot",
+      "reportOf",
+      "buildReport",
     ]) {
       expect(browser, name).toHaveProperty(name);
     }
