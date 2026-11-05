@@ -99,7 +99,7 @@ Random parts use the lowercase Crockford base32 alphabet `0123456789abcdefghjkmn
 
 - The 8 digits of a `RefId` are the UTC date of creation (`YYYYMMDD`), and must be a valid calendar date. They are informational and are not compared with `createdAt`.
 - Sequential identifiers (`m`, `p`, `d`) are **never reused**. The file that holds them records the highest number ever issued (`lastIssued`, §7.1 and §12.2); a new item takes that number plus one, and the counter never goes down, even when the item with the highest number is deleted. A deletion still removes every link to the deleted thing (§14).
-- `p0` is the whole-reference note: a piece that covers the whole of the reference's first media item. `p1`, `p2`… are pins.
+- `p0` is the whole-reference note: a piece that covers every media item of the reference, in id order (for a reference with one media item, that item; for a capture split into segments, every segment). `p1`, `p2`… are pins.
 - **Slugs:** `^[a-z0-9]+(-[a-z0-9]+)*$`, 1–64 characters, and not one of the Windows reserved device names (`con`, `prn`, `aux`, `nul`, `com1`–`com9`, `lpt1`–`lpt9`). **A slug never changes**: renaming changes `name` (or the family's name), not the slug. A slug is derived from the name when the thing is created, in this order:
   1. **Derive:** decompose with NFKD, drop combining marks, lowercase, replace each run of characters other than `a–z` and `0–9` with `-`, trim `-`.
   2. **Shorten** to at most 64 characters, always: cut at the last `-` within the limit, or exactly at the limit when there is no `-` within it, then remove a trailing `-`.
@@ -276,7 +276,7 @@ type Reference = {
   createdAt: Timestamp;
   updatedAt: Timestamp;
   source: {
-    via: "paste" | "drop" | "url-capture";
+    via: "paste" | "drop" | "file-picker" | "url-capture"; // file-picker = a file chosen with the app's file chooser
     url: HttpUrl | null;   // required (not null) when via is "url-capture"
   };
   result: {                // not null when this is a generated version brought back to a project
@@ -342,7 +342,7 @@ type Pin = {
 
 ### 7.4 Pieces
 
-A piece is something the user pointed at: the whole-reference note (`p0`, covering the whole first media item) or a pin. Pieces are addressed across the library as `PieceRef` (`ref-20261104-k3x9ab#p2`). `p0` always exists.
+A piece is something the user pointed at: the whole-reference note (`p0`, covering every media item of the reference, in id order) or a pin. Pieces are addressed across the library as `PieceRef` (`ref-20261104-k3x9ab#p2`). `p0` always exists.
 
 ### 7.5 Piece interpretation
 
@@ -665,7 +665,7 @@ Staleness covers the note only. Moving or resizing a pin's region, or replacing 
 
 ### 15.1 Version numbers
 
-- `formatVersion` is a positive integer. Version 1 is this document. Every change to the format, even adding an optional-looking field, is a new version: there are no minor versions.
+- `formatVersion` is a positive integer. Version 1 is this document. Every change to the format, even adding an optional-looking field, is a new version: there are no minor versions. **One exception, made once:** on 2026-11-04, before any tool had written a v1 file, `file-picker` was added to `source.via` (§7.1) without a new version. No other change to version 1 is allowed.
 - Every JSON file in the library carries `formatVersion`. The library's version is the one in `library.json`. After a completed migration, every library file has it.
 - The media marker (§6.1) carries its own `formatVersion`, independent of the library's: the media folder may be absent from a computer, or still syncing, when the library migrates. `tastelib` migrates the marker on disk when the media folder is next attached or written to; read-only commands migrate it in memory only. A marker version change never requires a library migration. The marker is not compared with `library.json` and never counts for `mixed-format-versions`. A marker with a version above what the tool supports is reported as `newer-format`, and the tool then writes nothing to the media folder (no captures, no deletions, no marker migration) until it is updated; the library itself stays usable.
 - A tool that supports version N reads every version from 1 to N and writes only version N. A file with a version above N is reported as `newer-format` and is not checked further; a tool never writes to a library that contains one.
@@ -732,7 +732,7 @@ The version in `library.json` is not used to decide: a migration of a library wi
 | 1 | errors (or, with `--strict`, warnings) |
 | 2 | could not run: not a library (no `library.json`), unreadable folder, bad arguments |
 
-Options: `--json` (machine-readable report), `--strict` (warnings fail), `--checksums` (hash every media file instead of comparing sizes only). The CI check of the sample library runs with `--strict --checksums`.
+Options: `--json` (machine-readable report), `--strict` (warnings fail), `--checksums` (hash every media file instead of comparing sizes only). The CI check of the golden v1 library ([design.md](design.md) §15) runs with `--strict --checksums`.
 
 ### 16.2 Codes
 
