@@ -26,7 +26,6 @@ function faulty(
   return {
     counts,
     open: guard("open", realFileSystem.open) as FileSystem["open"],
-    readFile: realFileSystem.readFile,
     rename: guard("rename", realFileSystem.rename),
     unlink: guard("unlink", realFileSystem.unlink),
     mkdir: guard("mkdir", realFileSystem.mkdir) as FileSystem["mkdir"],
@@ -192,28 +191,148 @@ describe("replaceFile", () => {
     });
   });
 
-  it("flushes the folder in durable mode (not on Windows)", async () => {
+  it("flushes the folder in durable mode on a real file system", async () => {
     await withTempDir(async (dir) => {
-      const durable = faulty((operation, path) =>
-        operation === "open" && path === dir ? "EMFILE" : undefined,
-      );
       const result = await replaceFile(join(dir, "a.json"), bytes("x"), {
         expected: "absent",
         durable: true,
-        platform: "linux",
-        fs: durable,
       });
-      // The folder was opened for the flush, which the injected failure turned into an io-error.
-      expect(result).toMatchObject({ status: "failed", failure: { operation: "sync-folder" } });
+      expect(result.status).toBe("done");
+    });
+  });
 
-      const windows = await replaceFile(join(dir, "b.json"), bytes("x"), {
+  it("reports a failed folder flush as applied: the file is already written", async () => {
+    await withTempDir(async (dir) => {
+      const target = join(dir, "refs", "a.json");
+      const result = await replaceFile(target, bytes("NEW"), {
+        expected: "absent",
+        durable: true,
+        platform: "linux",
+        fs: faulty((operation, path) =>
+          operation === "open" && path === join(dir, "refs") ? "EIO" : undefined,
+        ),
+      });
+      expect(result).toMatchObject({
+        status: "failed",
+        applied: true,
+        createdFolders: [join(dir, "refs")],
+        failure: { operation: "sync-folder", errno: "EIO" },
+      });
+      expect(await readFile(target, "utf8")).toBe("NEW");
+    });
+  });
+
+  it("flushes the parent of every folder it created, and skips flushing on Windows", async () => {
+    await withTempDir(async (dir) => {
+      const flushed: string[] = [];
+      const watching = faulty((operation, path) => {
+        if (operation === "open" && !path.includes(".tmp-") && !path.endsWith(".json")) {
+          flushed.push(path);
+        }
+        return undefined;
+      });
+      await replaceFile(join(dir, "projects", "p", "a.json"), bytes("x"), {
+        expected: "absent",
+        durable: true,
+        platform: "linux",
+        fs: watching,
+      });
+      expect(flushed).toEqual([dir, join(dir, "projects"), join(dir, "projects", "p")]);
+
+      flushed.length = 0;
+      await replaceFile(join(dir, "b.json"), bytes("x"), {
         expected: "absent",
         durable: true,
         platform: "win32",
-        fs: durable,
+        fs: watching,
       });
-      expect(windows.status).toBe("done");
-      expect((await stat(join(dir, "b.json"))).isFile()).toBe(true);
+      expect(flushed).toEqual([]);
+    });
+  });
+
+  it("never creates folders above the library root", async () => {
+    await withTempDir(async (dir) => {
+      const root = join(dir, "gone-lib");
+      const result = await replaceFile(join(root, "references", "r.json"), bytes("x"), {
+        expected: "absent",
+        root,
+      });
+      expect(result).toMatchObject({
+        status: "failed",
+        applied: false,
+        failure: { operation: "stat", errno: "ENOENT" },
+      });
+      expect(await readdir(dir)).toEqual([]);
+    });
+  });
+
+  it("creates folders below an existing root", async () => {
+    await withTempDir(async (dir) => {
+      const result = await replaceFile(join(dir, "references", "r.json"), bytes("x"), {
+        expected: "absent",
+        root: dir,
+      });
+      expect(result).toEqual({ status: "done", createdFolders: [join(dir, "references")] });
+    });
+  });
+
+  it("removes the folders already created when a deeper mkdir fails", async () => {
+    await withTempDir(async (dir) => {
+      const result = await replaceFile(join(dir, "projects", "p", "a.json"), bytes("x"), {
+        expected: "absent",
+        fs: faulty((operation, _path, count) =>
+          operation === "mkdir" && count === 2 ? "EACCES" : undefined,
+        ),
+      });
+      expect(result).toMatchObject({ status: "failed", failure: { operation: "mkdir" } });
+      expect(await readdir(dir)).toEqual([]);
+    });
+  });
+
+  it("refuses at once when the target changed size, without reading it", async () => {
+    await withTempDir(async (dir) => {
+      const target = join(dir, "a.json");
+      await writeFile(target, "old");
+      const result = await replaceFile(target, bytes("mine"), {
+        expected: bytes("old"),
+        at: async (point) => {
+          if (point === "before-rename") await writeFile(target, Buffer.alloc(1024, 0x20));
+        },
+      });
+      expect(result.status).toBe("write-conflict");
+      expect((await stat(target)).size).toBe(1024);
+    });
+  });
+
+  it("ends with write-conflict when the caller's check says a migration backup appeared", async () => {
+    await withTempDir(async (dir) => {
+      const target = join(dir, "a.json");
+      await writeFile(target, "old");
+      const result = await replaceFile(target, bytes("mine"), {
+        expected: bytes("old"),
+        conflictCheck: async () => true,
+      });
+      expect(result.status).toBe("write-conflict");
+      expect(await readFile(target, "utf8")).toBe("old");
+      expect(await readdir(dir)).toEqual(["a.json"]);
+    });
+  });
+
+  it("lets an exception without an errno propagate from the cleanup", async () => {
+    await withTempDir(async (dir) => {
+      const target = join(dir, "a.json");
+      await writeFile(target, "other");
+      await expect(
+        replaceFile(target, bytes("mine"), {
+          expected: bytes("old"),
+          fs: {
+            ...realFileSystem,
+            unlink: async () => {
+              throw new SimulatedCrash("crash in cleanup");
+            },
+          },
+        }),
+      ).rejects.toBeInstanceOf(SimulatedCrash);
     });
   });
 });
@@ -291,6 +410,24 @@ describe("Windows retries", () => {
       expect(result.status).toBe("write-conflict");
       expect(await readFile(target, "utf8")).toBe("theirs");
       expect(await readdir(dir)).toEqual(["a.json"]);
+    });
+  });
+
+  it("calls the caller's check before each retry", async () => {
+    await withTempDir(async (dir) => {
+      const target = join(dir, "a.json");
+      await writeFile(target, "old");
+      let calls = 0;
+      const result = await replaceFile(target, bytes("mine"), {
+        expected: bytes("old"),
+        platform: "win32",
+        fs: faulty((operation) => (operation === "rename" ? "EBUSY" : undefined)),
+        now: () => 0,
+        sleep: async () => undefined,
+        conflictCheck: async () => ++calls >= 3,
+      });
+      expect(result.status).toBe("write-conflict");
+      expect(calls).toBe(3);
     });
   });
 

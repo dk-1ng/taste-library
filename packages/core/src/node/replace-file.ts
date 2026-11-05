@@ -15,7 +15,7 @@ import { randomPart, type RandomSource } from "../ids/random.js";
 /** The subset of `node:fs/promises` the primitive needs; tests wrap it to inject failures. */
 export type FileSystem = Pick<
   typeof fsPromises,
-  "open" | "readFile" | "rename" | "unlink" | "mkdir" | "rmdir" | "stat"
+  "open" | "rename" | "unlink" | "mkdir" | "rmdir" | "stat"
 >;
 
 export const realFileSystem: FileSystem = fsPromises;
@@ -39,13 +39,35 @@ export type WriteOutcome =
     }
   /** The target differs from `expected`; the other writer's bytes were left alone. */
   | { status: "write-conflict"; file: string }
-  | { status: "failed"; failure: IoFailure };
+  | {
+      status: "failed";
+      failure: IoFailure;
+      /**
+       * `true` when the rename or removal had already happened (only the folder flush failed): the
+       * file counts as written, so a caller that undoes its writes must undo this one too.
+       * Folders this call created are then left in place and listed in `createdFolders`.
+       */
+      applied: boolean;
+      createdFolders: string[];
+    };
 
 export interface WriteOptions {
   /** The exact bytes read before, or `"absent"`. */
   expected: Expected;
   /** `fsync` the folder after the rename or deletion, except on Windows (design section 4 "Durability"). */
   durable?: boolean;
+  /**
+   * The library folder. Folders are created only strictly below it; when it is missing the write
+   * fails with `io-error` `ENOENT` (the library moved or its drive went away). Without it, any
+   * missing folder above the target is created.
+   */
+  root?: string;
+  /**
+   * Called next to every re-read of the target (before the rename and before each Windows retry);
+   * returns `true` to end the write with `write-conflict`, for example because a migration backup
+   * appeared (design section 4, layer 8). The migration runner itself omits it.
+   */
+  conflictCheck?: () => Promise<boolean>;
   /** Name used in results, normally the path relative to the library. Default: the target path. */
   file?: string;
   fs?: FileSystem;
@@ -86,6 +108,8 @@ interface Context {
   now: () => number;
   sleep: (milliseconds: number) => Promise<void>;
   at: (point: string) => void | Promise<void>;
+  root: string | undefined;
+  conflictCheck: (() => Promise<boolean>) | undefined;
 }
 
 function context(target: string, options: WriteOptions): Context {
@@ -97,6 +121,8 @@ function context(target: string, options: WriteOptions): Context {
     now: options.now ?? (() => performance.now()),
     sleep: options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms))),
     at: options.at ?? (() => undefined),
+    root: options.root,
+    conflictCheck: options.conflictCheck,
   };
 }
 
@@ -105,6 +131,8 @@ function failure(ctx: Context, operation: string, error: unknown, errno: string)
   return new Stop({
     status: "failed",
     failure: { code: "io-error", operation, file: ctx.file, errno, message: detail },
+    applied: false,
+    createdFolders: [],
   });
 }
 
@@ -119,21 +147,33 @@ async function io<T>(ctx: Context, operation: string, call: () => Promise<T>): P
   }
 }
 
-/** Reads the target again and compares it with what the writer started from. */
+/**
+ * Reads the target again and compares it with what the writer started from. The size is compared
+ * first, on the same handle, so a target that grew huge is never read.
+ */
 async function checkTarget(ctx: Context, expected: Expected): Promise<void> {
-  let current: Uint8Array | "absent";
+  if ((await ctx.conflictCheck?.()) === true) {
+    throw new Stop({ status: "write-conflict", file: ctx.file });
+  }
+  let same: boolean;
   try {
-    current = await ctx.fs.readFile(ctx.target);
+    const handle = await ctx.fs.open(ctx.target, constants.O_RDONLY);
+    try {
+      const info = await handle.stat();
+      if (expected === "absent" || !info.isFile() || info.size !== expected.byteLength) {
+        same = false;
+      } else {
+        same = Buffer.compare(expected, await handle.readFile()) === 0;
+      }
+    } finally {
+      await handle.close();
+    }
   } catch (error) {
     const errno = errnoOf(error);
     if (errno === undefined) throw error;
     if (errno !== "ENOENT") throw failure(ctx, "read", error, errno);
-    current = "absent";
+    same = expected === "absent";
   }
-  const same =
-    expected === "absent" || current === "absent"
-      ? expected === current
-      : Buffer.compare(expected, current) === 0;
   if (!same) throw new Stop({ status: "write-conflict", file: ctx.file });
 }
 
@@ -173,6 +213,15 @@ async function withRetries(
 async function createMissingFolders(ctx: Context, folder: string): Promise<string[]> {
   const missing: string[] = [];
   let current = folder;
+  if (ctx.root !== undefined) {
+    try {
+      await ctx.fs.stat(ctx.root);
+    } catch (error) {
+      const errno = errnoOf(error);
+      if (errno === undefined) throw error;
+      throw failure(ctx, "stat", error, errno);
+    }
+  }
   for (;;) {
     try {
       await ctx.fs.stat(current);
@@ -181,6 +230,7 @@ async function createMissingFolders(ctx: Context, folder: string): Promise<strin
       const errno = errnoOf(error);
       if (errno === undefined) throw error;
       if (errno !== "ENOENT") throw failure(ctx, "stat", error, errno);
+      if (current === ctx.root) throw failure(ctx, "stat", error, errno);
       missing.unshift(current);
       const parent = dirname(current);
       if (parent === current) break;
@@ -216,8 +266,7 @@ async function removeFolders(ctx: Context, folders: string[]): Promise<void> {
   }
 }
 
-async function flushFolder(ctx: Context, folder: string, durable: boolean | undefined) {
-  if (durable !== true || ctx.platform === "win32") return;
+async function flushFolder(ctx: Context, folder: string) {
   await io(ctx, "sync-folder", async () => {
     const handle = await ctx.fs.open(folder, constants.O_RDONLY);
     try {
@@ -226,6 +275,29 @@ async function flushFolder(ctx: Context, folder: string, durable: boolean | unde
       await handle.close();
     }
   });
+}
+
+/**
+ * Durable mode, after the rename or removal: flushes the target's folder and the parent of every
+ * folder this call created, so no folder entry is lost in a power cut. Never on Windows. A failure
+ * here comes after the change, so it is reported as `applied`.
+ */
+async function flushDurably(
+  ctx: Context,
+  durable: boolean | undefined,
+  folder: string,
+  createdFolders: string[],
+): Promise<void> {
+  if (durable !== true || ctx.platform === "win32") return;
+  try {
+    for (const created of createdFolders) await flushFolder(ctx, dirname(created));
+    await flushFolder(ctx, folder);
+  } catch (error) {
+    if (error instanceof Stop && error.outcome.status === "failed") {
+      throw new Stop({ ...error.outcome, applied: true, createdFolders });
+    }
+    throw error;
+  }
 }
 
 /**
@@ -261,13 +333,19 @@ export async function replaceFile(
     await checkTarget(ctx, options.expected);
     await withRetries(ctx, "rename", options.expected, () => ctx.fs.rename(temporary, target));
     temporaryExists = false;
-    await flushFolder(ctx, folder, options.durable);
+    await flushDurably(ctx, options.durable, folder, createdFolders);
     return { status: "done", createdFolders };
   } catch (error) {
     if (!(error instanceof Stop)) throw error;
     // Cleanup runs only here, on result paths (design section 4 "Cleanup only on result paths").
-    if (temporaryExists) await ctx.fs.unlink(temporary).catch(() => undefined);
-    await removeFolders(ctx, createdFolders);
+    if (temporaryExists) {
+      await ctx.fs.unlink(temporary).catch((unlinkError: unknown) => {
+        // A failed cleanup leaves the temporary file (design section 4); a bug still propagates.
+        if (errnoOf(unlinkError) === undefined) throw unlinkError;
+      });
+    }
+    const applied = error.outcome.status === "failed" && error.outcome.applied;
+    if (!applied) await removeFolders(ctx, createdFolders);
     return error.outcome;
   }
 }
@@ -282,7 +360,7 @@ export async function removeFile(
     await ctx.at("before-unlink");
     await checkTarget(ctx, options.expected);
     await withRetries(ctx, "unlink", options.expected, () => ctx.fs.unlink(target));
-    await flushFolder(ctx, dirname(target), options.durable);
+    await flushDurably(ctx, options.durable, dirname(target), []);
     return { status: "done", createdFolders: [] };
   } catch (error) {
     if (!(error instanceof Stop)) throw error;
