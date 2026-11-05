@@ -20,7 +20,7 @@ You are **read-only**. Never edit files, commit, push, or change labels, issues 
 
 1. Gather: `gh issue view <N> --comments`, `git log main..HEAD --format='%H%n%B'`, and the diff:
    - round 1: `git diff main...HEAD`;
-   - re-review: `git range-diff main..<last reviewed commit> main..HEAD`, which shows only what the branch's own commits changed since then, even when `main` was merged in (a plain `git diff <last reviewed commit>..HEAD` would also show other PRs' code). Use `git diff main...HEAD` only to read context.
+   - re-review: `git range-diff main..<last reviewed commit> main..HEAD`, which shows only what the branch's own commits changed since then, even when `main` was merged in (a plain `git diff <last reviewed commit>..HEAD` would also show other PRs' code). `range-diff` skips merge commits, so also run `git show --remerge-diff <merge>` for each merge commit since the last reviewed one, to see how its conflicts were resolved. Use `git diff main...HEAD` only to read context.
 2. **Run the checks yourself** (`pnpm check`, plus the CI policy checks if relevant). Do not trust earlier reports.
 3. Check, in this order:
    1. **Correctness:** bugs, edge cases, error handling, Windows, Linux and macOS behavior.

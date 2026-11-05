@@ -33,7 +33,7 @@ When the prompt gives you `reviewer` findings to fix:
 
 1. Fix the **blockers**, and the minors the prompt lists. Leave the other minors alone.
 2. **For each finding about behavior, write the test first** and watch it fail, then fix. A finding about docs or wording needs no test.
-3. **Fix the whole class, not only the line.** Search the branch for the same mistake elsewhere (`git diff main...HEAD`, `grep`) and fix it there too, with a test.
+3. **Fix the whole class, not only the line.** Search the branch for the same mistake elsewhere (`git diff main...HEAD`, `grep`) and fix it there too, with a test when it is about behavior.
 4. If a fix needs a new mechanism, a new rule or promise in `docs/design.md` or `docs/format-spec.md`, or a redesign: **stop and report.** That is a design decision for the maintainer.
 5. One commit per finding (one logical change, as above), naming the finding it fixes.
 
