@@ -59,6 +59,9 @@ const TYPE_NAMES: Record<string, string> = {
   null: "null",
 };
 
+/** What a size bound can be about: a list or a number. A string or a plain object that happens to have a `length` is a wrong type, reported as such. */
+const SIZED = new Set(["array", "number", "int"]);
+
 function quoted(values: readonly unknown[]): string {
   return values.map((value) => JSON.stringify(value)).join(", ");
 }
@@ -87,12 +90,14 @@ function genericMessage(issue: z.core.$ZodIssue): string {
       return "does not match any allowed form.";
     }
     case "too_small": {
+      if (!SIZED.has(issue.origin)) return "";
       const minimum = String(issue.minimum);
       if (issue.origin === "array")
         return `must have at least ${minimum} ${minimum === "1" ? "item" : "items"}.`;
       return issue.inclusive ? `must be at least ${minimum}.` : `must be greater than ${minimum}.`;
     }
     case "too_big": {
+      if (!SIZED.has(issue.origin)) return "";
       const maximum = String(issue.maximum);
       if (issue.origin === "array")
         return `must have at most ${maximum} ${maximum === "1" ? "item" : "items"}.`;
@@ -129,10 +134,16 @@ export function issuesFromZod(error: z.ZodError, file: string): Issue[] {
 
   for (const issue of error.issues) {
     if (issue.code === "unrecognized_keys") {
-      for (const key of issue.keys)
-        add("schema-violation", [...issue.path, key], "is not a field of this file.");
+      const given = (issue as { params?: { message?: unknown } }).params?.message;
+      const message = typeof given === "string" ? given : "is not a field of this file.";
+      for (const key of issue.keys) add("schema-violation", [...issue.path, key], message);
     } else if (issue.code === "custom") {
       add(codeOf(issue), issue.path, issue.message);
+    } else if (
+      (issue.code === "too_small" || issue.code === "too_big") &&
+      !SIZED.has(issue.origin)
+    ) {
+      continue; // the type issue of the same value says it
     } else if (issue.code === "invalid_key") {
       // The path of a key issue is the record; the offending key is the last segment already.
       add("schema-violation", issue.path, genericMessage(issue));

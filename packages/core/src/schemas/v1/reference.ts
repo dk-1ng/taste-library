@@ -68,13 +68,13 @@ const Frame = z.strictObject({
 });
 
 /**
- * The fields of a media item. Only a video has frames: for an image or a page the list is not
- * parsed at all, so a stray list of frames is reported once, as a whole.
+ * A media item. `frames` is read as it comes and checked by kind in the cross check below: only a
+ * video has frames, and an unknown kind must not hide the item's other fields.
  */
-function mediaShape<K extends z.ZodType, F extends z.ZodType>(kind: K, frames: F) {
-  return {
+const Media = z
+  .strictObject({
     id: MediaId,
-    kind,
+    kind: z.enum(["image", "page", "video"]),
     file: MediaPath,
     type: z.enum(MEDIA_TYPES),
     bytes: integer(1),
@@ -82,25 +82,15 @@ function mediaShape<K extends z.ZodType, F extends z.ZodType>(kind: K, frames: F
     width: integer(1, 1000000),
     height: integer(1, 1000000),
     durationMs: integer(1).nullable(),
-    frames,
-  };
-}
-
-const NoFrames = z.array(z.unknown()).superRefine((frames, ctx) => {
-  if (frames.length > 0) addRuleIssue(ctx, [], 'must be empty unless kind is "video".');
-});
-
-const Media = z
-  .discriminatedUnion("kind", [
-    z.strictObject(mediaShape(z.enum(["image", "page"]), NoFrames)),
-    z.strictObject(mediaShape(z.literal("video"), z.array(Frame).max(1000))),
-  ])
+    frames: z.unknown(),
+  })
   .check(
     crossCheck((raw, ctx) => {
       const media = objectOf(raw);
       const kind = stringOf(media.kind);
       if (kind !== "image" && kind !== "page" && kind !== "video") return;
       const isVideo = kind === "video";
+      checkFrames(media.frames, isVideo, ctx);
       const type = stringOf(media.type);
       if (type !== undefined && Object.hasOwn(EXTENSION, type)) {
         if (isVideo && !type.startsWith("video/")) {
@@ -145,6 +135,20 @@ const Media = z
       });
     }),
   );
+
+const NoFrames = z.array(z.unknown()).superRefine((frames, ctx) => {
+  if (frames.length > 0) addRuleIssue(ctx, [], 'must be empty unless kind is "video".');
+});
+const VideoFrames = z.array(Frame).max(1000);
+
+/** Parses the frames by kind and reports what is wrong with them under `frames`. */
+function checkFrames(frames: unknown, isVideo: boolean, ctx: z.RefinementCtx): void {
+  const result = (isVideo ? VideoFrames : NoFrames).safeParse(frames, { reportInput: true });
+  if (result.success) return;
+  for (const issue of result.error.issues) {
+    ctx.addIssue({ ...issue, path: ["frames", ...issue.path] } as never);
+  }
+}
 
 const Region = z
   .strictObject({
@@ -191,7 +195,8 @@ function recordOf<K extends z.core.$ZodRecordKey, V extends z.ZodType>(key: K, v
         keys: ["__proto__"],
         path: [],
         input: input as Record<string, unknown>,
-      });
+        params: { message: 'is not allowed; keys are "p0" or the id of a pin.' },
+      } as never);
     }
   });
   return guard.pipe(z.record(key, value));

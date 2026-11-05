@@ -1229,7 +1229,7 @@ describe("reference: more cascades", () => {
       writable: true,
     });
     expect(validate(proto)[0]?.message).toBe(
-      "interpretations.__proto__: is not a field of this file.",
+      'interpretations.__proto__: is not allowed; keys are "p0" or the id of a pin.',
     );
   });
 
@@ -1312,5 +1312,64 @@ describe("reference: last round", () => {
         .map((f) => f.pointer)
         .sort(),
     ).toEqual(["/media/0/file", "/media/0/kind"]);
+  });
+});
+
+describe("reference: sixth round", () => {
+  it("a value that is not a list but has a length gets the type issue only", () => {
+    for (const patch of [
+      { media: "" },
+      { media: { length: 51 } },
+      { pins: "x".repeat(501) },
+      { pins: { length: 501 } },
+    ]) {
+      const found = validate({ ...example(), ...patch });
+      const key = Object.keys(patch)[0];
+      expect(found.filter((f) => f.pointer === `/${key}`).map((f) => f.message)).toEqual([
+        `${key}: must be an array.`,
+      ]);
+    }
+    const tags = broken((r) => (r.interpretations.p0.proposal.keywords = "x".repeat(51)));
+    expect(tags.map((f) => f.message)).toEqual([
+      "interpretations.p0.proposal.keywords: must be an array.",
+    ]);
+    const r = example();
+    r.media.push({ ...video(), frames: { length: 1001 } });
+    r.lastIssued.media = 2;
+    expect(validate(r).map((f) => f.message)).toEqual(["media[1].frames: must be an array."]);
+  });
+
+  it("an unknown kind does not hide the other fields of the item", () => {
+    const found = broken((r) => {
+      r.media[0].kind = "vidoe";
+      r.media[0].bytes = 0;
+      r.media[0].sha256 = "X";
+      r.media[0].extra = 1;
+      r.media[0].id = "m01";
+    });
+    expect(found.map((f) => f.pointer).sort()).toEqual([
+      "/media/0/bytes",
+      "/media/0/extra",
+      "/media/0/id",
+      "/media/0/kind",
+      "/media/0/sha256",
+    ]);
+  });
+
+  it("frames of a video are still checked in full, with their paths", () => {
+    const r = example();
+    const v = video();
+    v.frames[0].bytes = 0;
+    delete v.frames[1].sha256;
+    r.media.push(v);
+    r.lastIssued.media = 2;
+    expect(
+      validate(r)
+        .map((f) => `${f.pointer}: ${f.message}`)
+        .sort(),
+    ).toEqual([
+      "/media/1/frames/0/bytes: media[1].frames[0].bytes: must be at least 1.",
+      "/media/1/frames/1/sha256: media[1].frames[1].sha256: is required.",
+    ]);
   });
 });
