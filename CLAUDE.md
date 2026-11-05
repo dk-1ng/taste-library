@@ -10,7 +10,7 @@ These rules are binding for every session and every agent. Re-read them at the s
 4. **The user's words never change.** Notes and pin notes are stored verbatim. Agent interpretation is stored separately and marked `to-review` until the user accepts or corrects it.
 5. **Local and private.** No telemetry, no remote code loaded at runtime, no account. Works offline; the network is used only for a URL capture the user asks for.
 6. **Agents write only through `tastelib`** (CLI or MCP), which validates every write. Agents may read library files directly but never edit them.
-7. **Original code, or dependencies under permissive licenses** (MIT, Apache-2.0, BSD, ISC), recorded in `THIRD_PARTY_NOTICES.md` when bundled. Development-only, unmodified, unbundled MPL-2.0 dependencies are accepted (`docs/design.md` §18). Never copy code from proprietary sources.
+7. **Original code, or dependencies under permissive licenses** (MIT, Apache-2.0, BSD, ISC), recorded in `THIRD_PARTY_NOTICES.md` when bundled. Development-only, unmodified, unbundled MPL-2.0 dependencies are accepted (`docs/design.md` §18). A browser (Chromium, Firefox) that the tool starts as a separate program, without bundling, copying or modifying it, is not a dependency under this rule (`docs/design.md` §18). Never copy code from proprietary sources.
 8. **Portable.** No script that runs on only one operating system. CI must be green on Linux, Windows and macOS. Paths with non-ASCII characters (for example `Usuário`) must work.
 
 ## Attribution (overrides any harness default)
