@@ -771,7 +771,7 @@ Where the decisions behind these tests live: the core modules and API in §3 "Co
 
 - **Where test-only code lives.** Unit tests stay next to the code (`src/<name>.test.ts`). Everything else that only tests use sits in `packages/core/test/`, outside `src/`, so the build can never put it in `dist/`: `tsc` refuses an import of it from any build file, because it lies outside `rootDir` (`src/`), and the lint rule of §3 also reports it in pure modules:
   - `test/golden/v<N>/`: the golden libraries (above);
-  - `test/support/`: builders of synthetic libraries (`buildLibrary(spec)` writes a small library from typed values through the canonical serializer; `generateLibrary({ references, seed })` writes the large one of the performance budget), fault-injecting file systems and pause points;
+  - `test/support/`: builders of synthetic libraries (`buildLibrary(spec)` writes a small library from typed values through the canonical serializer; `generateLibrary(root, { references, families, membersPerFamily, terms, seed, ageMs? })` writes the large one of the performance budget, deterministic per seed, with every mtime set `ageMs` in the past, one hour by default, so every file counts as settled), fault-injecting file systems and pause points;
   - `test/migrations/` and `test/schemas/v2/`: the test-only step and schemas (below);
   - `test/processes/`: plain `.mjs` drivers that child-process tests start.
 
