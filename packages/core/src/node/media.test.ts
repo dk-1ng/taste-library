@@ -1,4 +1,4 @@
-import { mkdir, readFile, rm, symlink, truncate, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rm, symlink, truncate, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { makePng, withTempDir } from "@tastelib/testkit";
 import { describe, expect, it } from "vitest";
@@ -111,6 +111,47 @@ describe("checkMedia", () => {
       await writeFile(join(media, A, "m99.png"), makePng(2, 2, 3));
       const issues = await mediaIssues(library, media);
       expect(brief(issues, "orphan-media")).toEqual([]);
+    });
+  });
+
+  it.skipIf(process.platform === "win32")(
+    "reports a FIFO at a media path without hanging",
+    async () => {
+      const { execFileSync } = await import("node:child_process");
+      await withMedia(async (library, media, files) => {
+        const path = join(media, ...(files[0] as string).split("/"));
+        await rm(path);
+        execFileSync("mkfifo", [path]);
+        expect(brief(await mediaIssues(library, media), "media-mismatch")).toEqual([
+          ["warning", `media:${files[0]}`],
+        ]);
+      });
+    },
+  );
+
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+    "reports no orphan when references/ cannot be listed",
+    async () => {
+      await withMedia(async (library, media) => {
+        await chmod(join(library, "references"), 0o000);
+        try {
+          expect(brief(await mediaIssues(library, media), "orphan-media")).toEqual([]);
+        } finally {
+          await chmod(join(library, "references"), 0o755);
+        }
+      });
+    },
+  );
+
+  it("treats a non-integer marker version as a schema violation, not a newer format", async () => {
+    await withMedia(async (library, media) => {
+      await writeFile(
+        join(media, "tastelib-media.json"),
+        '{"formatVersion":1.5,"libraryId":"lib-9k3m7q2x4a"}',
+      );
+      const issues = await mediaIssues(library, media);
+      expect(brief(issues, "newer-format")).toEqual([]);
+      expect(brief(issues, "schema-violation")).toHaveLength(1);
     });
   });
 

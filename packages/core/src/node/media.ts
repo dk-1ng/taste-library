@@ -1,9 +1,11 @@
 import { createHash } from "node:crypto";
 import type { Dirent } from "node:fs";
+import { constants } from "node:fs";
 import { open, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { FORMAT_REGISTRY, type FormatRegistry } from "../format.js";
 import { readLibraryJson } from "../json/read.js";
+import { versionOf } from "../validation/file.js";
 import { type Issue, makeIssue } from "../validation/issue.js";
 import type { Snapshot } from "../validation/library.js";
 import { validateValue } from "../validation/zod-issues.js";
@@ -100,8 +102,8 @@ async function checkMarker(
   const json = readLibraryJson(read.bytes, MARKER_REPORT_FILE);
   if (!json.ok) return { issues: json.issues, proceed: true };
 
-  const version = (json.value as { formatVersion?: unknown } | null)?.formatVersion;
-  if (typeof version === "number" && version > registry.current) {
+  const version = versionOf(json.value);
+  if (version !== null && version > registry.current) {
     return {
       issues: [
         makeIssue(
@@ -114,7 +116,7 @@ async function checkMarker(
       proceed: true,
     };
   }
-  const spec = registry.versions[typeof version === "number" ? version : registry.current];
+  const spec = registry.versions[version ?? registry.current];
   const schema = (spec ?? registry.versions[registry.current])?.schemas.marker;
   if (schema === undefined) throw new Error(`The registry has no version ${registry.current}.`);
   const issues = validateValue(schema, json.value, MARKER_REPORT_FILE);
@@ -145,7 +147,7 @@ async function measure(
   real: string,
   checksums: boolean,
 ): Promise<{ regular: false } | { regular: true; bytes: number; sha256: string | null }> {
-  const handle = await open(real, "r");
+  const handle = await open(real, constants.O_RDONLY | (constants.O_NONBLOCK ?? 0));
   try {
     const info = await handle.stat();
     if (!info.isFile()) return { regular: false };
@@ -253,7 +255,8 @@ async function orphanIssues(
       ),
     ];
   }
-  for (const entry of top) {
+  const byName = (a: Dirent, b: Dirent): number => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+  for (const entry of [...top].sort(byName)) {
     const ref = entry.name.normalize("NFC");
     // A reference that could not be read may list files here: they are not known to be orphans.
     if (!REF_FOLDER.test(ref) || unknownRefs.has(ref)) continue;
@@ -274,7 +277,7 @@ async function orphanIssues(
       );
       continue;
     }
-    for (const child of children) {
+    for (const child of [...children].sort(byName)) {
       if (child.isDirectory()) continue;
       const path = `${ref}/${child.name.normalize("NFC")}`;
       if (!listed.has(path)) {
@@ -314,12 +317,16 @@ export async function checkMedia(
   if (!marker.proceed) return marker.issues;
 
   const { listed, unknownRefs } = listedMedia(snapshot);
+  // If references/ could not be listed, which files are listed is unknown: nothing is an orphan.
+  const referencesUnlisted = snapshot.issues.some(
+    (issue) => issue.code === "unreadable-file" && issue.file === "references",
+  );
   const perFile = await mapLimit([...listed.values()], CONCURRENCY, (entry) =>
     checkListed(mediaFolder, entry, options.checksums === true),
   );
   return [
     ...marker.issues,
     ...perFile.flat(),
-    ...(await orphanIssues(mediaFolder, listed, unknownRefs)),
+    ...(referencesUnlisted ? [] : await orphanIssues(mediaFolder, listed, unknownRefs)),
   ];
 }
