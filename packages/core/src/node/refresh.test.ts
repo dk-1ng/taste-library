@@ -293,7 +293,7 @@ describe("requests and refreshes", () => {
     await withGoldenCopy(async (dir) => {
       let listings = 0;
       const list = (async (path: string, options: never) => {
-        if (path === dir) listings += 1;
+        if (path === join(dir)) listings += 1;
         return readdir(path, options);
       }) as typeof readdir;
       const library = await open(dir, undefined, { readdir: list });

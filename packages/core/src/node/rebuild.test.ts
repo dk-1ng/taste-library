@@ -120,9 +120,7 @@ const STEPS: Record<string, Step> = {
   },
   async "outside new reference"({ dir, pick, references }) {
     const source = pick(references);
-    const id = `ref-20261231-${String(references.length)
-      .padStart(6, "0")
-      .replace(/[ilou]/g, "0")}`;
+    const id = `ref-20261231-${String(references.length).padStart(6, "0")}`;
     if (references.includes(id)) return;
     const text = await readFile(at(dir, `references/${source}.json`), "utf8");
     await writeFile(at(dir, `references/${id}.json`), text.replaceAll(source, id));
