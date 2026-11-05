@@ -48,7 +48,7 @@ Everything in this repository is in English: code, comments, docs, issues, commi
 - If it runs on `sonnet` and the issue is a spike or `complexity: high`, delegate to `architect` (and then to `implementer` on `opus`) instead of asking for a switch.
 - A bug that survived one fix goes to `architect`.
 - Never use effort `max` or the `fable` model unless the maintainer asks.
-- Subagents start with no conversation context. Every prompt states the issue number, the branch, the decisions already made, and "read `CLAUDE.md` and `docs/design.md` first; they are binding".
+- Subagents start with no conversation context. Every prompt states the issue number, the branch, the decisions already made, and "read `CLAUDE.md` and `docs/design.md` first; they are binding". A `reviewer` prompt also states the round, and for a re-review the earlier findings and the last reviewed commit (loop, step 6).
 - Agent boundaries: only the main session pushes, opens PRs, switches branches or merges. Labels and the board are changed only by the main session (through `scripts/loop.mjs`) and `tracker`. `architect`, `implementer`, `test-engineer`, `translator` and `reviewer` never do any of these.
 
 ## Sessions: clear and continue
@@ -73,8 +73,12 @@ When the maintainer says "continue":
 3. **Start:** `node scripts/loop.mjs start N` (label + board). Update `main` (`git switch main && git pull --ff-only`) and create `<type>/<issue>-short-description`. When resuming, switch to the existing branch instead.
 4. **Route the work:** spike → `architect`; `complexity: high` → `architect` plans, then `implementer` on `opus`/`high`; test infrastructure → `test-engineer`; otherwise inline, or `implementer` if it spans many files.
 5. **Verify** with `pnpm check` (lint, format check, typecheck, test, build; `docs/design.md` §3) and every acceptance criterion.
-6. **`reviewer`** reviews the branch. On `CHANGES REQUESTED`, fix and review again.
-   **Every finding is settled, never dropped:** it is fixed in the issue, or the maintainer decides to defer it and an issue is created for it. Never mark a finding as "documented" or "known limitation" on your own; ask the maintainer when fixing is not clearly in scope.
+6. **`reviewer`** reviews the branch (round 1). It grades every finding `blocker` or `minor` by the threat model (`docs/design.md` §14). **Every finding is settled, never dropped:**
+   - **Blockers** are fixed in the branch. Each fix starts with a test that fails without it, and also fixes the same mistake elsewhere in the branch. For `complexity: high`, `implementer` on `opus`/`high` fixes them; otherwise fix inline or with `implementer`.
+   - **Minors:** after each round, list them for the maintainer with a recommendation for each (fix now or defer). Fix the chosen ones in the same round as the blockers. The deferred ones go into **one** follow-up issue for the PR, created before the merge and linked in the PR. Never drop a minor, and never mark one "documented" or "known limitation" on your own.
+   - **`needs design decision`:** a fix that needs a new mechanism, a new rule or promise in `docs/design.md` or `docs/format-spec.md`, or a redesign goes to the maintainer (with `architect` for `complexity: high`). Never put one in the branch on your own.
+   - **Re-review** (rounds 2 and 3) after any change to product code since the last review. The prompt gives the round, the earlier findings and the last reviewed commit, and asks the reviewer to check those fixes and the diff since that commit. A change that only touches tests or docs needs no re-review. Never ask the reviewer to "look for new problems" in the whole branch or to treat every finding as blocking.
+   - **Merge** only after an `APPROVE` that covers the last change to product code. Three rounds at most: blockers left after round 3 go to `architect`, then to the maintainer.
 7. If `README.md` changed, **`translator`** updates `docs/pt-BR/README.md`.
 8. **Open the PR** (`Closes #N`, template filled, title = the Conventional Commit the squash will produce). Wait for CI with `gh pr checks <PR> --watch`; merge only when it is green. Ask the maintainer to approve the merge, then run `gh pr merge <PR> --squash --subject "<PR title> (#<issue>) (#<PR>)" --body "<why, if useful>"` with a body that ends with a blank line and `Assisted-by: Claude Code`. GitHub deletes the branch automatically. Then `git switch main && git pull --ff-only`.
 9. **Finish:** `node scripts/loop.mjs finish N`.
