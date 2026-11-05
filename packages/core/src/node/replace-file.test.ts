@@ -3,6 +3,7 @@ import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { join, sep } from "node:path";
 import { withTempDir } from "@tastelib/testkit";
 import { describe, expect, it } from "vitest";
+import { SimulatedCrash } from "../../test/support/crash.js";
 import {
   checkFile,
   type FileSystem,
@@ -12,8 +13,6 @@ import {
 } from "./replace-file.js";
 
 const bytes = (text: string): Uint8Array => new TextEncoder().encode(text);
-
-class SimulatedCrash extends Error {}
 
 /** Wraps the real file system; `fail` decides which calls throw an errno error. */
 function faulty(

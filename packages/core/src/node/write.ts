@@ -1,5 +1,6 @@
 import { lstat, stat } from "node:fs/promises";
 import { join } from "node:path";
+import type { Plan, Skipped } from "../changes/plan.js";
 import {
   classifyEntry,
   currentLayout,
@@ -7,7 +8,6 @@ import {
   type FormatRegistry,
   type LibraryFileKind,
 } from "../format.js";
-import type { Plan, Skipped } from "../changes/plan.js";
 import { canonicalize, serialize } from "../json/canonical.js";
 import { differsBesidesUpdatedAt, stampFile } from "../model/timestamps.js";
 import { Slug } from "../schemas/v1/shared.js";
@@ -17,13 +17,23 @@ import { type Issue, makeIssue } from "../validation/issue.js";
 import type { Snapshot } from "../validation/library.js";
 import { sortIssues } from "../validation/report.js";
 import type { OpenFailure, SnapshotResult } from "./open.js";
-import { type IoFailure, replaceFile, type WriteOptions } from "./replace-file.js";
+import {
+  checkFile,
+  type Expected,
+  type IoFailure,
+  removeFile,
+  replaceFile,
+  type WriteOptions,
+  type WriteOutcome,
+} from "./replace-file.js";
 
 /**
- * The write pipeline for one library file (docs/design.md section 4, "Writing library files" and
- * "Write gate"; format-spec §5, §14, §16). Every write goes through here: it is gated, validated,
- * canonicalized, stamped and serialized before anything touches the disk, and a refusal leaves
- * every file as it was.
+ * The write pipeline (docs/design.md section 4, "Writing library files" and "Write gate";
+ * format-spec §5, §14, §16). Every write goes through here: it is gated, validated, canonicalized,
+ * stamped and serialized before anything touches the disk, and a refusal leaves every file as it
+ * was. A plan of several files is checked against the disk as a whole before the first rename,
+ * then written in plan order, the primary change first; a stop after that reports the files
+ * written and not written.
  */
 
 /** Something that happened beyond the plan; the migration runner (#38) adds the `migrated` notice. */
@@ -103,25 +113,25 @@ export function kindOfPath(layout: FormatLayout, path: string): LibraryFileKind 
   return null;
 }
 
-const none: Common = { skipped: [], notices: [] };
-
-/**
- * A refusal, with its issues sorted as in format-spec §16.3. `notWritten` is empty when the
- * write was refused before it reached the disk, and the file when it was refused at the replace.
- */
-function refused(issues: Issue[], skipped: Skipped[] = [], notWritten: string[] = []): WriteResult {
-  return {
-    status: "refused",
-    issues: sortIssues(issues),
-    written: [],
-    notWritten,
-    skipped,
-    notices: [],
-  };
+/** What a write that ends with a refusal or a failure reports about the disk and the plan. */
+interface Stopped {
+  written: string[];
+  notWritten: string[];
+  skipped: Skipped[];
 }
 
-function failed(failure: WriteFailure): WriteResult {
-  return { status: "failed", failure, written: [], notWritten: [], ...none };
+const nothing: Stopped = { written: [], notWritten: [], skipped: [] };
+
+/**
+ * A refusal, with its issues sorted as in format-spec §16.3. `written` and `notWritten` are empty
+ * when the write was refused before it reached the disk.
+ */
+function refused(issues: Issue[], stopped: Stopped = nothing): WriteResult {
+  return { status: "refused", issues: sortIssues(issues), ...stopped, notices: [] };
+}
+
+function failed(failure: WriteFailure, stopped: Stopped = nothing): WriteResult {
+  return { status: "failed", failure, ...stopped, notices: [] };
 }
 
 const isError = (issue: Issue): boolean => issue.severity === "error";
@@ -181,11 +191,12 @@ function crossFiles(snapshot: Snapshot): Map<string, CrossFile> {
   return files;
 }
 
+/** Every link held by the files in `paths`. */
 function linksOf(
   files: Map<string, CrossFile>,
   context: WriteContext,
   unlistedFolders: readonly string[],
-  path: string,
+  paths: ReadonlySet<string>,
 ): LinkEvent[] {
   const links: LinkEvent[] = [];
   crossFileIssues(files, {
@@ -193,44 +204,55 @@ function linksOf(
     sha256: context.sha256,
     unlistedFolders,
     onLink: (link) => {
-      if (link.file === path) links.push(link);
+      if (paths.has(link.file)) links.push(link);
     },
   });
   return links;
 }
 
+/** A change after validation: the canonical new value, or `null` for a deletion. */
+interface Prepared {
+  path: string;
+  kind: LibraryFileKind;
+  value: unknown;
+  /** The bytes the snapshot read, or `"absent"` for a new file. */
+  expected: Expected;
+  /** The canonical old value, `null` for a new file. */
+  previous: unknown;
+}
+
 /**
- * The links of `path` that the new value adds and that do not resolve (design layer 4). A link is
- * new unless the same holder already linked to the same target; one that was already dangling is
- * kept. A link into a file that exists but is not `valid` cannot be checked and is refused too.
+ * The links that the plan adds and that do not resolve (design layer 4), judged on one view of the
+ * library with the whole plan applied, deletions included. A link is new unless the same holder of
+ * the same file already linked to the same target; one that was already dangling is kept. A link
+ * into a file that exists but is not `valid` cannot be checked and is refused too. Links that a
+ * deletion leaves dangling in files the plan does not change are not new, so they never refuse it.
  */
-function newBrokenLinks(
-  context: WriteContext,
-  snapshot: Snapshot,
-  path: string,
-  kind: LibraryFileKind,
-  next: unknown,
-): Issue[] {
+function newBrokenLinks(context: WriteContext, snapshot: Snapshot, changes: Prepared[]): Issue[] {
+  const paths = new Set(changes.filter((c) => c.value !== null).map((c) => c.path));
+  if (paths.size === 0) return [];
   const before = crossFiles(snapshot);
   const after = new Map(before);
-  after.set(path, {
-    kind,
-    status: "valid",
-    formatVersion: context.registry.current,
-    value: next,
-  });
-  const known = new Set(
-    linksOf(before, context, snapshot.unlistedFolders, path).map(
-      (link) => `${link.holder}\u0000${link.target}`,
-    ),
-  );
+  for (const change of changes) {
+    if (change.value === null) after.delete(change.path);
+    else {
+      after.set(change.path, {
+        kind: change.kind,
+        status: "valid",
+        formatVersion: context.registry.current,
+        value: change.value,
+      });
+    }
+  }
+  const key = (link: LinkEvent) => `${link.file}\u0000${link.holder}\u0000${link.target}`;
+  const known = new Set(linksOf(before, context, snapshot.unlistedFolders, paths).map(key));
   const issues: Issue[] = [];
-  for (const link of linksOf(after, context, snapshot.unlistedFolders, path)) {
-    if (link.state === "resolved" || known.has(`${link.holder}\u0000${link.target}`)) continue;
+  for (const link of linksOf(after, context, snapshot.unlistedFolders, paths)) {
+    if (link.state === "resolved" || known.has(key(link))) continue;
     issues.push(
       makeIssue(
         "dangling-link",
-        path,
+        link.file,
         link.pointer,
         link.state === "dangling"
           ? `${link.target} does not exist, so the link cannot be added.`
@@ -259,18 +281,87 @@ async function vanished(root: string): Promise<Pick<OpenFailure, "code" | "messa
   return null;
 }
 
-const encoder = new TextEncoder();
+/** The folder that could not be listed and holds `path`, or `undefined`. */
+function unlistedFolderOf(snapshot: Snapshot, path: string): string | undefined {
+  return snapshot.unlistedFolders.find((folder) => path.startsWith(`${folder}/`));
+}
 
 /**
- * Writes one library file: validates the new value, refuses a new `dangling-link`, canonicalizes,
- * stamps the timestamps and replaces the file with the check against the bytes that were read.
+ * Layer 2 of the pipeline: a plan may not replace or delete a file that is not `valid`, and is
+ * refused with the issues of each such file, and of each file it is blocked by that is not
+ * `valid`. A file it is blocked by that lies in a folder that could not be listed is unresolved
+ * (docs/design.md section 4, "Links to files with errors"), so it blocks with the folder's issue.
+ * A plan that breaks its own shape is a bug and throws.
+ */
+function blockingIssues(registry: FormatRegistry, snapshot: Snapshot, plan: Plan): Issue[] {
+  const layout = currentLayout(registry);
+  const seen = new Set<string>();
+  const issues: Issue[] = [];
+  for (const change of plan.changes) {
+    if (seen.has(change.path)) throw new Error(`The plan changes "${change.path}" twice.`);
+    seen.add(change.path);
+    const kind = kindOfPath(layout, change.path);
+    if (kind === null) throw new Error(`"${change.path}" is not a file of the format.`);
+    const existing = snapshot.files.get(change.path);
+    if (change.next === null) {
+      if (kind === "library") throw new Error("A plan may not delete library.json.");
+      if (existing === undefined) {
+        throw new Error(`The plan deletes "${change.path}", which the snapshot does not hold.`);
+      }
+    }
+    // A file with errors may hold the user's words in a form the tool cannot read: only the user repairs it.
+    if (existing !== undefined && existing.status !== "valid") issues.push(...existing.issues);
+  }
+  for (const path of plan.blockedBy ?? []) {
+    if (seen.has(path)) continue;
+    seen.add(path);
+    const file = snapshot.files.get(path);
+    if (file !== undefined) {
+      if (file.status !== "valid") issues.push(...file.issues);
+      continue;
+    }
+    const folder = unlistedFolderOf(snapshot, path);
+    if (folder === undefined) {
+      throw new Error(`The plan is blocked by "${path}", which the snapshot does not hold.`);
+    }
+    if (seen.has(folder)) continue;
+    seen.add(folder);
+    issues.push(...snapshot.issues.filter((issue) => issue.file === folder));
+  }
+  return issues;
+}
+
+const encoder = new TextEncoder();
+
+/** One file ready for the disk: its final bytes, or `null` for a deletion. */
+interface Ready {
+  path: string;
+  bytes: Uint8Array | null;
+  expected: Expected;
+}
+
+function conflictIssue(path: string, written: readonly string[]): Issue {
+  return makeIssue(
+    "write-conflict",
+    path,
+    null,
+    written.length === 0
+      ? "The file changed on disk after it was read, or a migration started; nothing was written. Read it again and retry."
+      : "The file changed on disk after it was read, or a migration started; the files before it were written, and it and the files after it were not. Read it again and retry.",
+  );
+}
+
+/**
+ * Writes a plan of library files: validates every new value, refuses a new `dangling-link`,
+ * canonicalizes, stamps the timestamps with one time, checks every target against the bytes that
+ * were read, and only then replaces or deletes the files in plan order.
  */
 export async function runWrite(
   context: WriteContext,
   build: Build,
   options: LibraryWriteOptions = {},
 ): Promise<WriteResult> {
-  // 1. Refresh the snapshot.
+  // 1. Refresh the snapshot, then the gate.
   const opened = await context.snapshot();
   if (!opened.ok) return failed({ code: opened.code, message: opened.message });
   const snapshot = opened.snapshot;
@@ -278,94 +369,125 @@ export async function runWrite(
   const stopped = await gate(context, snapshot);
   if (stopped !== null) return stopped;
 
-  // Plan.
+  // 2. Plan, and the files it may not touch.
   const plan = await build(snapshot);
-  const common: Common = { skipped: plan.skipped, notices: [] };
-  const [change, ...rest] = plan.changes;
-  if (change === undefined) return { status: "unchanged", ...common };
-  if (rest.length > 0) throw new Error("A write of more than one file is not supported yet.");
-  if (change.next === null) throw new Error("Deleting a file is not supported yet.");
-
+  const skipped = plan.skipped;
+  const beforeDisk: Stopped = { ...nothing, skipped };
   const registry = context.registry;
-  const kind = kindOfPath(currentLayout(registry), change.path);
-  if (kind === null) throw new Error(`"${change.path}" is not a file of the format.`);
-  const path = change.path;
-  const existing = snapshot.files.get(path);
-  // A file with errors may hold the user's words in a form the tool cannot read: only the user repairs it.
-  if (existing !== undefined && existing.status !== "valid") {
-    return refused([...existing.issues], plan.skipped);
+  const blocking = blockingIssues(registry, snapshot, plan);
+  if (blocking.length > 0) return refused(blocking, beforeDisk);
+
+  // 4. Validate every new value: the schema and every rule within the file.
+  const layout = currentLayout(registry);
+  const problems: Issue[] = [];
+  const prepared: Prepared[] = [];
+  for (const change of plan.changes) {
+    const path = change.path;
+    const kind = kindOfPath(layout, path) as LibraryFileKind;
+    const existing = snapshot.files.get(path);
+    const expected: Expected = existing?.bytes ?? "absent";
+    const previous = existing === undefined ? null : canonicalize(kind, existing.value);
+    if (change.next === null) {
+      prepared.push({ path, kind, value: null, expected, previous });
+      continue;
+    }
+    const text = JSON.stringify(change.next);
+    if (text === undefined) throw new Error("The new value cannot be written as JSON.");
+    const checked = checkLibraryFile(registry, kind, path, encoder.encode(text));
+    const errors = checked.issues.filter(isError);
+    if (checked.formatVersion !== registry.current && errors.length === 0) {
+      errors.push(
+        makeIssue(
+          "schema-violation",
+          path,
+          "/formatVersion",
+          `formatVersion: must be ${registry.current}, the version this tool writes.`,
+        ),
+      );
+    }
+    problems.push(...errors);
+    if (checked.status !== "valid" || errors.length > 0) continue;
+    const value = canonicalize(kind, checked.value);
+    // A change that changes nothing is dropped, so a file that is merely not canonical is not rewritten.
+    if (previous !== null && !differsBesidesUpdatedAt(previous, value)) continue;
+    prepared.push({ path, kind, value, expected, previous });
   }
+  if (problems.length > 0) return refused(problems, beforeDisk);
+  if (prepared.length === 0) return { status: "unchanged", skipped, notices: [] };
 
-  // Validate: the schema and every rule within the file.
-  const text = JSON.stringify(change.next);
-  if (text === undefined) throw new Error("The new value cannot be written as JSON.");
-  const checked = checkLibraryFile(registry, kind, path, encoder.encode(text));
-  const problems = checked.issues.filter(isError);
-  if (checked.formatVersion !== registry.current && problems.length === 0) {
-    problems.push(
-      makeIssue(
-        "schema-violation",
-        path,
-        "/formatVersion",
-        `formatVersion: must be ${registry.current}, the version this tool writes.`,
-      ),
-    );
-  }
-  if (checked.status !== "valid" || problems.length > 0) return refused(problems, plan.skipped);
+  const links = newBrokenLinks(context, snapshot, prepared);
+  if (links.length > 0) return refused(links, beforeDisk);
 
-  const canonical = canonicalize(kind, checked.value);
-  const previous = existing === undefined ? null : canonicalize(kind, existing.value);
-  if (previous !== null && !differsBesidesUpdatedAt(previous, canonical)) {
-    return { status: "unchanged", ...common };
-  }
-
-  const links = newBrokenLinks(context, snapshot, path, kind, canonical);
-  if (links.length > 0) return refused(links, plan.skipped);
-
-  // Timestamps, then the final value, validated again as an internal assertion.
+  // 6. and 7. Timestamps, with one time for every file, then the final value, validated again as
+  //    an internal assertion.
   const now = (options.clock?.() ?? new Date()).toISOString();
-  const stamped = stampFile(kind, previous, canonical, now);
-  const bytes = encoder.encode(serialize(kind, stamped));
-  const final = checkLibraryFile(registry, kind, path, bytes);
-  if (final.status !== "valid" || final.issues.length > 0) {
-    throw new Error(`The write layer produced an invalid ${path}: ${JSON.stringify(final.issues)}`);
-  }
+  const ready: Ready[] = prepared.map(({ path, kind, value, expected, previous }) => {
+    if (value === null) return { path, bytes: null, expected };
+    const bytes = encoder.encode(serialize(kind, stampFile(kind, previous, value, now)));
+    const final = checkLibraryFile(registry, kind, path, bytes);
+    if (final.status !== "valid" || final.issues.length > 0) {
+      throw new Error(
+        `The write layer produced an invalid ${path}: ${JSON.stringify(final.issues)}`,
+      );
+    }
+    return { path, bytes, expected };
+  });
 
-  // Replace, with the check against the bytes that were read.
-  const { clock: _clock, ...replaceOptions } = options;
-  const outcome = await replaceFile(join(context.root, ...path.split("/")), bytes, {
+  // 8. Replace. First every target is checked against the bytes that were read, so a change found
+  //    before the first rename refuses the whole write (format-spec §5).
+  const { clock: _clock, at, ...replaceOptions } = options;
+  const paths = ready.map((file) => file.path);
+  const optionsFor = (file: Ready): WriteOptions => ({
     ...replaceOptions,
-    expected: existing?.bytes ?? "absent",
+    at,
+    expected: file.expected,
     root: context.root,
-    file: path,
+    file: file.path,
     conflictCheck: () => backupPresent(context.root),
   });
-  if (outcome.status === "done") return { status: "written", written: [path], ...common };
-  if (outcome.status === "write-conflict") {
-    return refused(
-      [
-        makeIssue(
-          "write-conflict",
-          path,
-          null,
-          "The file changed on disk after it was read, or a migration started; nothing was written. Read it again and retry.",
-        ),
-      ],
-      plan.skipped,
-      [path],
-    );
-  }
-  if (outcome.failure.errno === "ENOENT" && !outcome.applied) {
-    // The library folder or its `library.json` went away since the snapshot was read (an unmounted
-    // drive, a moved folder): the same failure `openLibrary` gives (docs/design.md section 4, "Durability").
-    const gone = await vanished(context.root);
-    if (gone !== null) return failed(gone);
-  }
-  return {
-    status: "failed",
-    failure: outcome.failure,
-    written: outcome.applied ? [path] : [],
-    notWritten: outcome.applied ? [] : [path],
-    ...common,
+  const targetOf = (path: string) => join(context.root, ...path.split("/"));
+  /** The result for a stop at `index`: the files before it were written, the rest were not. */
+  const stopAt = async (
+    index: number,
+    outcome: Exclude<WriteOutcome, { status: "done" }>,
+    applied = false,
+  ): Promise<WriteResult> => {
+    const cut = applied ? index + 1 : index;
+    const lists: Stopped = { written: paths.slice(0, cut), notWritten: paths.slice(cut), skipped };
+    if (!applied && (outcome.status === "write-conflict" || outcome.failure.errno === "ENOENT")) {
+      // The library folder or its `library.json` went away since the snapshot was read (an
+      // unmounted drive, a moved folder): the same failure `openLibrary` gives (docs/design.md
+      // section 4, "Durability").
+      const gone = await vanished(context.root);
+      if (gone !== null) return failed(gone, lists);
+    }
+    if (outcome.status === "write-conflict") {
+      return refused([conflictIssue(outcome.file, lists.written)], lists);
+    }
+    return failed(outcome.failure, lists);
   };
+
+  for (const file of ready) {
+    const check = await checkFile(targetOf(file.path), optionsFor(file));
+    if (check.status === "write-conflict") return stopAt(0, check);
+    if (check.status === "failed") {
+      return stopAt(0, { ...check, applied: false, createdFolders: [] });
+    }
+  }
+  await at?.("checked");
+
+  for (const [index, file] of ready.entries()) {
+    const target = targetOf(file.path);
+    let outcome: WriteOutcome;
+    if (file.bytes !== null) outcome = await replaceFile(target, file.bytes, optionsFor(file));
+    else if (file.expected === "absent")
+      throw new Error(`"${file.path}" to delete was never read.`);
+    else outcome = await removeFile(target, { ...optionsFor(file), expected: file.expected });
+    if (outcome.status === "done") {
+      await at?.(`${file.bytes === null ? "deleted" : "wrote"}:${file.path}`);
+      continue;
+    }
+    return stopAt(index, outcome, outcome.status === "failed" && outcome.applied);
+  }
+  return { status: "written", written: paths, skipped, notices: [] };
 }

@@ -667,15 +667,6 @@ describe("refusals", () => {
       expect(result.issues[0]?.message).toContain("cannot be checked");
     });
   });
-
-  it("rejects a deletion plan as unsupported", async () => {
-    await withGoldenCopy(async (dir) => {
-      const library = await open(dir);
-      await expect(
-        library.write(() => ({ changes: [{ path: "glossary.json", next: null }], skipped: [] })),
-      ).rejects.toThrow("not supported");
-    });
-  });
 });
 
 describe("failures", () => {
