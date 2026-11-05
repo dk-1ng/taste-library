@@ -165,7 +165,7 @@ export function canonicalIssue(
   if (read.hadCr) causes.push("CRLF line endings");
   const why =
     causes.length > 0
-      ? `has ${causes.join(" and ")}`
+      ? `has ${causes.join(" and ")} (and may differ in other ways)`
       : "differs from the canonical form in layout, key or list order, escapes or numbers";
   return makeIssue(
     "not-canonical",
