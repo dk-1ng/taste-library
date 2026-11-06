@@ -3,12 +3,14 @@ import type { BigIntStats } from "node:fs";
 import { lstat, mkdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { dirname, join, relative, sep } from "node:path";
 import { describe, expect, it } from "vitest";
+import { v1ToV2 } from "../../test/migrations/v1-to-v2.js";
 import { recordPoints } from "../../test/support/crash.js";
 import { editJson, readTree, withGoldenCopy } from "../../test/support/golden.js";
 import { type Json, open, readJson, tree } from "../../test/support/library.js";
 import { TEST_REGISTRY } from "../../test/support/registry.js";
-import { FORMAT_REGISTRY } from "../format.js";
+import { FORMAT_REGISTRY, type FormatRegistry } from "../format.js";
 import { type MigrationPlan, planMigration } from "../migrations/plan.js";
+import type { LibraryValues, MigrationStep } from "../migrations/steps.js";
 import { dryRunMigration } from "./migrate.js";
 import type { OpenOptions } from "./open.js";
 import { type FileSystem, realFileSystem } from "./replace-file.js";
@@ -36,6 +38,27 @@ const PRIMITIVE_POINTS = new Set(["temp-written", "before-rename", "before-unlin
 async function openOlder(library: string, options: OpenOptions = {}) {
   return open(library, TEST_REGISTRY, { hostName: HOST, pid: PID, ...options });
 }
+
+/**
+ * The test registry with a step that leaves a schema violation in a file only the migration
+ * adds, so the plan of the golden library stops at step 3 (format-spec §15.3).
+ */
+function blockedAtStep3(): FormatRegistry {
+  const step: MigrationStep = (input: LibraryValues) => {
+    const out = new Map(v1ToV2(input));
+    (out.get("glossary/term-2b4d6f.json") as Json).pieces = "not a list";
+    return out;
+  };
+  return { ...TEST_REGISTRY, steps: { 1: step } };
+}
+
+/** The issue the plan of `blockedAtStep3` stops on, at its migrated path. */
+const STEP_3_ISSUE = {
+  severity: "error",
+  code: "schema-violation",
+  file: "glossary/term-2b4d6f.json",
+  pointer: "/pieces",
+};
 
 type Ready = Extract<MigrationPlan, { status: "ready" }>;
 
@@ -411,6 +434,19 @@ describe("library.migrate", () => {
     });
   });
 
+  it("refuses a migration blocked at step 3 and leaves every file byte for byte, with no .tastelib", async () => {
+    await withGoldenCopy(async (library) => {
+      const before = await tree(library);
+      const bytes = await readTree(library);
+      const handle = await open(library, blockedAtStep3(), { hostName: HOST, pid: PID });
+      const result = await handle.migrate({ clock });
+      expect(result).toMatchObject({ status: "refused", issues: [STEP_3_ISSUE], notices: [] });
+      expect(await tree(library)).toEqual(before);
+      expect(await readTree(library)).toEqual(bytes);
+      expect(await exists(join(library, ".tastelib"))).toBe(false);
+    });
+  });
+
   it("writes nothing for a current library, not even .tastelib", async () => {
     await withGoldenCopy(async (library) => {
       const before = await tree(library);
@@ -703,6 +739,33 @@ describe("the write gate migrates an older library first", () => {
         notices: [],
       });
       expect(await tree(library)).toEqual(before);
+    });
+  });
+
+  it("refuses a migration blocked at step 3 before the plan is built, and leaves every file byte for byte, with no .tastelib", async () => {
+    await withGoldenCopy(async (library) => {
+      const before = await tree(library);
+      const bytes = await readTree(library);
+      const handle = await open(library, blockedAtStep3(), { hostName: HOST, pid: PID });
+      let built = false;
+      const result = await handle.write(
+        () => {
+          built = true;
+          return { changes: [], skipped: [] };
+        },
+        { clock },
+      );
+      expect(built).toBe(false);
+      expect(result).toMatchObject({
+        status: "refused",
+        issues: [STEP_3_ISSUE],
+        written: [],
+        notWritten: [],
+        notices: [],
+      });
+      expect(await tree(library)).toEqual(before);
+      expect(await readTree(library)).toEqual(bytes);
+      expect(await exists(join(library, ".tastelib"))).toBe(false);
     });
   });
 });

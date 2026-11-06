@@ -80,7 +80,11 @@ async function migratedFiles(): Promise<Map<string, Uint8Array>> {
   });
 }
 
-/** Options of a run through the faulty file system, with folder flushes on (a non-Windows platform). */
+/**
+ * Options of a run through the faulty file system, with folder flushes on (a non-Windows platform).
+ * Every run that injects the platform goes through it, with no fault when it needs none: it fakes
+ * the folder flushes, which the real file system cannot do on Windows.
+ */
 function through(faults: FaultyFs, at?: LibraryWriteOptions["at"]): LibraryWriteOptions {
   return { clock, fs: faults.fs, platform: "linux", ...(at === undefined ? {} : { at }) };
 }
@@ -434,15 +438,13 @@ describe("a crash cleans up nothing", () => {
         let atCrash: Record<string, string> | null = null;
         const handle = await openOlder(library);
         await expect(
-          handle.migrate({
-            clock,
-            platform: "linux",
-            at: async (reached) => {
+          handle.migrate(
+            through(faultyFs(library), async (reached) => {
               if (reached !== point) return;
               atCrash = await tree(library);
               throw new SimulatedCrash(point);
-            },
-          }),
+            }),
+          ),
         ).rejects.toBeInstanceOf(SimulatedCrash);
         expect(await tree(library)).toEqual(atCrash);
         if (point !== "before-claim") expect(await exists(at(library, BACKUP))).toBe(true);
@@ -532,14 +534,13 @@ describe("a cleanup that fails too is finished by the owning handle before its n
       for (const path of ADDED) expect(await exists(at(library, path)), path).toBe(true);
       const { points, at: record } = recordPoints();
       let beforeClaim: Map<string, Uint8Array> | null = null;
-      const result = await handle.write(noop, {
-        clock,
-        platform: "linux",
-        at: async (point) => {
+      const result = await handle.write(
+        noop,
+        through(faultyFs(library), async (point) => {
           record(point);
           if (point === "before-claim") beforeClaim = await libraryFiles(library);
-        },
-      });
+        }),
+      );
       expect(result).toEqual({
         status: "unchanged",
         skipped: [],
@@ -569,14 +570,13 @@ describe("a cleanup that fails too is finished by the owning handle before its n
       expect((await readJson(library, "guardrails.json")).formatVersion).toBe(1);
       const { points, at: record } = recordPoints();
       let beforeClaim: Map<string, Uint8Array> | null = null;
-      const result = await handle.write(noop, {
-        clock,
-        platform: "linux",
-        at: async (point) => {
+      const result = await handle.write(
+        noop,
+        through(faultyFs(library), async (point) => {
           record(point);
           if (point === "before-claim") beforeClaim = await libraryFiles(library);
-        },
-      });
+        }),
+      );
       expect(result).toMatchObject({
         status: "unchanged",
         notices: [{ code: "migrated", from: 1, to: 2 }],
@@ -596,7 +596,7 @@ describe("a cleanup that fails too is finished by the owning handle before its n
       const handle = await failTwice(library, "glossary.json");
       await writeFile(at(library, "glossary.json"), original.get("glossary.json") as Uint8Array);
       const { points, at: record } = recordPoints();
-      const result = await handle.migrate({ clock, platform: "linux", at: record });
+      const result = await handle.migrate(through(faultyFs(library), record));
       expect(result).toMatchObject({ status: "migrated" });
       const resumed = points.slice(0, points.indexOf("before-claim"));
       expect(resumed.filter((p) => p.startsWith("restored:") || p.startsWith("removed:"))).toEqual([
@@ -612,13 +612,12 @@ describe("a cleanup that fails too is finished by the owning handle before its n
       const { rm } = await import("node:fs/promises");
       await rm(at(library, ADDED[0] as string));
       let beforeClaim: Map<string, Uint8Array> | null = null;
-      const result = await handle.write(noop, {
-        clock,
-        platform: "linux",
-        at: async (point) => {
+      const result = await handle.write(
+        noop,
+        through(faultyFs(library), async (point) => {
           if (point === "before-claim") beforeClaim = await libraryFiles(library);
-        },
-      });
+        }),
+      );
       expect(result.status).toBe("unchanged");
       expect(beforeClaim).toEqual(original);
     });
@@ -652,7 +651,7 @@ describe("a cleanup that fails too is finished by the owning handle before its n
         owner.replace(NOW.toISOString(), "2026-11-05T10:00:01.000Z"),
       );
       const left = await tree(library);
-      const result = await handle.write(noop, { clock, platform: "linux" });
+      const result = await handle.write(noop, through(faultyFs(library)));
       expect(result).toMatchObject({
         status: "refused",
         issues: [{ code: "write-conflict", file: BACKUP }],
@@ -669,7 +668,7 @@ describe("a cleanup that fails too is finished by the owning handle before its n
       const runnerBytes = await readFile(at(library, "library.json"));
       await writeFile(at(library, "library.json"), `${runnerBytes.toString("utf8")} `);
       const left = await tree(library);
-      const result = await handle.write(noop, { clock, platform: "linux" });
+      const result = await handle.write(noop, through(faultyFs(library)));
       expect(result).toMatchObject({
         status: "refused",
         issues: [{ code: "write-conflict", file: "library.json" }],
@@ -701,7 +700,7 @@ describe("a cleanup that fails too is finished by the owning handle before its n
         const handle = await failTwice(library, failAt);
         await writeFile(at(library, edit), "{}\n");
         const left = await tree(library);
-        const result = await handle.write(noop, { clock, platform: "linux" });
+        const result = await handle.write(noop, through(faultyFs(library)));
         expect(result, edit).toMatchObject({
           status: "refused",
           issues: [{ code: "write-conflict", file: edit }],
