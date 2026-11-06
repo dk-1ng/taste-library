@@ -60,8 +60,9 @@ interface Cached {
   /** Read again at the next refresh whatever its fingerprint. */
   unsettled: boolean;
   /**
-   * The errno of a symbolic link that could not be followed, or `refused-outside` or
-   * `refused-own` for a link that is not read, when that is what was listed.
+   * The errno of a symbolic link that could not be followed, or `refused-outside`,
+   * `refused-own` or `refused-unchecked-<errno>` for a link that is not read, when that is what
+   * was listed.
    */
   brokenLink: string | null;
 }
