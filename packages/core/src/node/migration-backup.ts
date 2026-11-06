@@ -71,7 +71,7 @@ const claimTime = z
  * `owner.json`: the process that claimed the backup, its computer's host name, and the time of the
  * claim. A process id that is not an integer from 1 to 2^31 - 1 makes the file unreadable:
  * `process.kill(0, 0)` and `process.kill(-1, 0)` signal a process group or every process, and Node
- * refuses ids above 2^31 - 1 (docs/design.md section 15, "The process probe").
+ * refuses ids above 2^31 - 1.
  */
 export const ownerSchema = z.strictObject({
   pid: z

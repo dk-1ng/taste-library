@@ -33,7 +33,7 @@ export interface Plan {
   /**
    * Files the plan depends on without changing them, for example the file that holds an entry to
    * delete when that file has errors: the write is refused with their issues when one is not
-   * `valid` (docs/design.md section 4, layer 2).
+   * `valid` (docs/design.md section 4, "Writing library files", "Plan").
    */
   blockedBy?: string[];
 }

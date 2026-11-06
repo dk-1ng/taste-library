@@ -1,5 +1,5 @@
 /**
- * The timestamps a write sets (docs/design.md section 4, "Writing library files", layer 6;
+ * The timestamps a write sets (docs/design.md section 4, "Writing library files", "Timestamps";
  * format-spec §4.1). Pure: canonical values and a time in, a stamped value out.
  *
  * Operations leave the old `updatedAt` in place; this helper decides which files and entries

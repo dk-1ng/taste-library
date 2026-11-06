@@ -51,7 +51,7 @@ export interface CrossOptions {
  * One link of a file. `holder` is what holds the link: the id of the entry (a term, guardrail,
  * statement or direction) or, for a link outside entries, the field (`members`, `result`), so a
  * link is "the same" when its holder and target are (docs/design.md section 4, "Writing library
- * files", layer 4). `target` names what it points to, for messages; `to` is the target itself.
+ * files", "Validation"). `target` names what it points to, for messages; `to` is the target itself.
  */
 export interface LinkEvent {
   file: string;
