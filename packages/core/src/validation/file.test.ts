@@ -1,7 +1,11 @@
+import { withTempDir } from "@tastelib/testkit";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { FORMAT_REGISTRY, type FormatRegistry } from "../format.js";
+import { generateLibrary } from "../../test/support/generate.js";
+import { GOLDEN_V1 } from "../../test/support/golden.js";
+import { FORMAT_REGISTRY, type FormatRegistry, type LibraryFileKind } from "../format.js";
 import { serialize } from "../json/canonical.js";
+import { openLibrary } from "../node/open.js";
 import { checkLibraryFile } from "./file.js";
 
 const bytes = (text: string): Uint8Array => new TextEncoder().encode(text);
@@ -142,5 +146,101 @@ describe("a file whose whole content is null", () => {
     const check = checkLibraryFile(FORMAT_REGISTRY, kind, path, new TextEncoder().encode("null"));
     expect(check.status).toBe("invalid");
     expect(check.issues.map((issue) => issue.code)).toContain("schema-violation");
+  });
+});
+
+describe("the canonical check gives the verdict of a byte comparison with serialize", () => {
+  type Loose = Record<string, unknown>;
+  const decoder = new TextDecoder();
+
+  /** The verdict by its definition (format-spec §3.3): the bytes equal `serialize` of the value. */
+  function byteVerdict(kind: LibraryFileKind, value: unknown, given: Uint8Array): boolean {
+    const expected = bytes(serialize(kind, value));
+    return expected.length === given.length && expected.every((byte, i) => byte === given[i]);
+  }
+
+  /** Every key order reversed, deeply. */
+  function reverseKeys(value: unknown): unknown {
+    if (Array.isArray(value)) return value.map(reverseKeys);
+    if (typeof value !== "object" || value === null) return value;
+    return Object.fromEntries(
+      Object.entries(value as Loose)
+        .reverse()
+        .map(([key, item]) => [key, reverseKeys(item)]),
+    );
+  }
+
+  /** Every list reversed, deeply (some lists must be sorted, so this may not be canonical). */
+  function reverseLists(value: unknown): unknown {
+    if (Array.isArray(value)) return value.map(reverseLists).reverse();
+    if (typeof value !== "object" || value === null) return value;
+    return Object.fromEntries(
+      Object.entries(value as Loose).map(([key, item]) => [key, reverseLists(item)]),
+    );
+  }
+
+  /** The file and variants of it: BOM, CRLF, reordered, compact, escaped, `1.0`, no final LF. */
+  function variants(original: Uint8Array): Uint8Array[] {
+    const text = decoder.decode(original);
+    const value: unknown = JSON.parse(text);
+    const escapeOne = text.replace(
+      /[\u0080-\uffff]/,
+      (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`,
+    );
+    return [
+      original,
+      bytes(`﻿${text}`),
+      bytes(text.replaceAll("\n", "\r\n")),
+      bytes(`﻿${text.replaceAll("\n", "\r\n")}`),
+      bytes(`${JSON.stringify(reverseKeys(value), null, 2)}\n`),
+      bytes(`${JSON.stringify(reverseLists(value), null, 2)}\n`),
+      bytes(`${JSON.stringify(value)}\n`),
+      bytes(text.trimEnd()),
+      bytes(text.replace('"formatVersion": 1,', '"formatVersion": 1.0,')),
+      bytes(escapeOne),
+    ];
+  }
+
+  async function compareOn(root: string): Promise<{ canonical: number; notCanonical: number }> {
+    const opened = await openLibrary(root);
+    if (!opened.ok) throw new Error(opened.message);
+    const result = await opened.library.snapshot();
+    if (!result.ok) throw new Error(result.message);
+    let canonical = 0;
+    let notCanonical = 0;
+    for (const file of result.snapshot.files.values()) {
+      if (file.bytes === null) throw new Error(`${file.path} could not be read`);
+      for (const variant of variants(file.bytes)) {
+        const check = checkLibraryFile(FORMAT_REGISTRY, file.kind, file.path, variant);
+        if (check.status !== "valid") continue;
+        const flagged = check.issues.some((issue) => issue.code === "not-canonical");
+        const expected = !byteVerdict(file.kind, check.value, variant);
+        expect(flagged, `${file.path}: ${JSON.stringify(decoder.decode(variant))}`).toBe(expected);
+        if (expected) notCanonical++;
+        else canonical++;
+      }
+    }
+    return { canonical, notCanonical };
+  }
+
+  it("on the golden library and its variants", async () => {
+    const counts = await compareOn(GOLDEN_V1);
+    expect(counts.canonical).toBeGreaterThan(5);
+    expect(counts.notCanonical).toBeGreaterThan(50);
+  });
+
+  it("on a generated library and its variants", async () => {
+    await withTempDir(async (root) => {
+      await generateLibrary(root, {
+        references: 60,
+        families: 4,
+        membersPerFamily: 10,
+        terms: 20,
+        seed: 7,
+      });
+      const counts = await compareOn(root);
+      expect(counts.canonical).toBeGreaterThan(60);
+      expect(counts.notCanonical).toBeGreaterThan(400);
+    });
   });
 });
