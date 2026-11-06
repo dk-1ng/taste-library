@@ -11,7 +11,8 @@
 //   block N REASON    Label issue N blocked and comment the reason.
 //   comment N TEXT    Post a status comment on issue N.
 //   add N             Add issue N to the board as Todo.
-//   plan N M<k> [TYPE]  Plan a triaged issue: milestone M<k>, status ready, optional type.
+//   plan N M<k> [TYPE]  Plan a triaged issue: milestone M<k>, status ready (a blocked issue
+//                     stays blocked; `unblock` lifts it), optional type.
 //   unblock N         Lift the blocked label (never on a checkpoint) and mark it ready.
 
 import { spawnSync } from "node:child_process";
@@ -381,8 +382,9 @@ const USAGE = `Usage: node scripts/loop.mjs <command>
   block N REASON    Label issue N blocked and comment the reason.
   comment N TEXT    Post a status comment on issue N.
   add N             Add issue N to the board as Todo.
-  plan N M<k> [TYPE]  Plan a triaged issue: milestone M<k>, status ready, and optionally
-                    its type (bug, feature, chore, docs or spike).
+  plan N M<k> [TYPE]  Plan a triaged issue: milestone M<k>, status ready (a blocked issue
+                    stays blocked; `unblock` lifts it), and optionally its type (bug,
+                    feature, chore, docs or spike).
   unblock N         Lift the blocked label (never on a checkpoint) and mark it ready.`;
 
 function usageError(message) {

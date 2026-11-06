@@ -13,7 +13,7 @@ Run by the main session only. The rules every agent follows are in `CLAUDE.md`; 
 - Next issue = the lowest-numbered open issue in the earliest open milestone, skipping `status: blocked`. `scripts/loop.mjs status` applies the rule.
 - `type: checkpoint` issues are pauses for a real-use test by the maintainer. They stay `status: blocked` until the maintainer closes them. Never work on one, and never skip past one. A checkpoint comes last within its milestone, whatever its number: it is picked only when no other non-blocked issue is left there; then stop and tell the maintainer.
 - Labels and the board change only through `scripts/loop.mjs`, except that the follow-up issue of step 6 is created with its label (`gh issue create --label "status: triage"`). It is plain Node (no dependencies), needs `gh`, and runs as `node scripts/loop.mjs <command>` on every operating system.
-- A `status: triage` issue gets planned by `node scripts/loop.mjs plan N M<k> [TYPE]` (milestone, `status: ready`, optional `type: …`, never `checkpoint`), and `unblock N` lifts `status: blocked` (never on a checkpoint). The main session runs `plan` and `unblock` only on the maintainer's decision.
+- A `status: triage` issue gets planned by `node scripts/loop.mjs plan N M<k> [TYPE]` (milestone, `status: ready`, optional `type: …`, never `checkpoint`; a blocked issue stays blocked until `unblock`), and `unblock N` lifts `status: blocked` (never on a checkpoint). The main session runs `plan` and `unblock` only on the maintainer's decision.
 
 ## Sessions: clear and continue
 
