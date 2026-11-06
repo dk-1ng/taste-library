@@ -11,6 +11,9 @@
 //   block N REASON    Label issue N blocked and comment the reason.
 //   comment N TEXT    Post a status comment on issue N.
 //   add N             Add issue N to the board as Todo.
+//   plan N M<k> [TYPE]  Plan a triaged issue: milestone M<k>, status ready (a blocked issue
+//                     stays blocked; `unblock` lifts it), optional type.
+//   unblock N         Lift the blocked label (never on a checkpoint) and mark it ready.
 
 import { spawnSync } from "node:child_process";
 
@@ -25,6 +28,8 @@ const IN_PROGRESS = "status: in progress";
 const READY = "status: ready";
 const BLOCKED = "status: blocked";
 const CHECKPOINT = "type: checkpoint";
+const TRIAGE = "status: triage";
+const TYPES = ["bug", "feature", "chore", "docs", "spike"];
 
 // ---------------------------------------------------------------- pure logic
 
@@ -71,6 +76,80 @@ export function pickNext(issues) {
     if (labelsOf(issue).has(CHECKPOINT)) return ["checkpoint", [issue]];
   }
   return ["blocked", current];
+}
+
+/** A refusal: the command is understood but not allowed; nothing was changed. */
+export class Refusal extends Error {}
+
+/**
+ * Check the arguments of `plan` (pure). Returns { rank, type } or { error }.
+ * `rank` is the k of "M<k>"; `type` is a label name ("type: bug") or null.
+ */
+export function parsePlanArgs(milestoneArg, typeArg) {
+  const match = /^M(\d+)$/.exec(milestoneArg ?? "");
+  if (!match) return { error: `Not a milestone: ${milestoneArg} (expected M<k>, for example M1).` };
+  if (typeArg === undefined) return { rank: Number(match[1]), type: null };
+  if (typeArg === "checkpoint") {
+    return { error: "A checkpoint is set only by the maintainer, never by `plan`." };
+  }
+  if (!TYPES.includes(typeArg)) {
+    return { error: `Not a type: ${typeArg} (expected ${TYPES.join(", ")}).` };
+  }
+  return { rank: Number(match[1]), type: `type: ${typeArg}` };
+}
+
+/** The one open milestone whose title starts with `M<rank>` and a space. */
+export function findMilestone(milestones, rank) {
+  const prefix = `M${rank} `;
+  const found = milestones.filter((m) => (m.title ?? "").startsWith(prefix));
+  if (found.length === 0) return { error: `No milestone starts with "M${rank} ".` };
+  if (found.length > 1) return { error: `More than one milestone starts with "M${rank} ".` };
+  if (found[0].state !== "open") return { error: `Milestone "${found[0].title}" is closed.` };
+  return { milestone: found[0] };
+}
+
+/**
+ * What `plan` changes on an issue (pure). `issue` has state, labels; `milestones` is the
+ * repository list. Returns { milestone, add, remove } or { error }.
+ */
+export function planChanges(issue, milestones, milestoneArg, typeArg) {
+  const parsed = parsePlanArgs(milestoneArg, typeArg);
+  if (parsed.error) return parsed;
+  const found = findMilestone(milestones, parsed.rank);
+  if (found.error) return found;
+  const names = labelsOf(issue);
+  if (issue.state !== undefined && issue.state !== "OPEN") {
+    return { error: `Issue #${issue.number} is closed.` };
+  }
+  if (names.has(IN_PROGRESS)) return { error: `Issue #${issue.number} is in progress.` };
+  if (parsed.type && names.has(CHECKPOINT)) {
+    return { error: `Issue #${issue.number} is a checkpoint: its type is the maintainer's.` };
+  }
+  // A blocked issue (a checkpoint, for example) stays blocked: only `unblock` makes it ready.
+  const add = names.has(BLOCKED) ? [] : [READY];
+  const remove = [TRIAGE];
+  if (parsed.type) {
+    add.push(parsed.type);
+    for (const name of names) {
+      if (name.startsWith("type: ") && name !== parsed.type) remove.push(name);
+    }
+  }
+  return { milestone: found.milestone.title, add, remove };
+}
+
+/** What `unblock` changes on an issue (pure). Returns { add, remove } or { error }. */
+export function unblockChanges(issue) {
+  const names = labelsOf(issue);
+  if (issue.state !== undefined && issue.state !== "OPEN") {
+    return { error: `Issue #${issue.number} is closed.` };
+  }
+  if (names.has(CHECKPOINT)) {
+    return {
+      error: `Issue #${issue.number} is a checkpoint: it stays blocked until the maintainer closes it.`,
+    };
+  }
+  if (!names.has(BLOCKED)) return { error: `Issue #${issue.number} is not blocked.` };
+  return { add: [READY], remove: [BLOCKED] };
 }
 
 // ---------------------------------------------------------------- GitHub / git
@@ -164,12 +243,13 @@ function setStatus(number, status) {
   ]);
 }
 
-function editLabels(number, { add = [], remove = [] } = {}) {
+function editLabels(number, { add = [], remove = [], milestone = null } = {}) {
   const current = labelsOf(
     ghJson("issue", "view", String(number), "--repo", REPO, "--json", "labels"),
   );
   const cmd = ["gh", "issue", "edit", String(number), "--repo", REPO];
   const base = cmd.length;
+  if (milestone) cmd.push("--milestone", milestone);
   for (const name of add) cmd.push("--add-label", name);
   for (const name of remove) {
     if (current.has(name)) cmd.push("--remove-label", name);
@@ -271,6 +351,29 @@ function cmdAdd(number) {
   console.log(`add #${number} -> ok`);
 }
 
+function viewIssue(number) {
+  return ghJson("issue", "view", String(number), "--repo", REPO, "--json", "number,state,labels");
+}
+
+function cmdPlan(number, milestoneArg, typeArg) {
+  // Check the arguments before any network call.
+  const parsed = parsePlanArgs(milestoneArg, typeArg);
+  if (parsed.error) throw new Refusal(parsed.error);
+  const milestones = ghJson("api", `repos/${REPO}/milestones?state=all&per_page=100`);
+  const changes = planChanges(viewIssue(number), milestones, milestoneArg, typeArg);
+  if (changes.error) throw new Refusal(changes.error);
+  editLabels(number, changes);
+  setStatus(number, "todo");
+  console.log(`plan #${number} -> ok (${changes.milestone})`);
+}
+
+function cmdUnblock(number) {
+  const changes = unblockChanges(viewIssue(number));
+  if (changes.error) throw new Refusal(changes.error);
+  editLabels(number, changes);
+  console.log(`unblock #${number} -> ok`);
+}
+
 const USAGE = `Usage: node scripts/loop.mjs <command>
 
   status            What "continue" should do now, plus local checks.
@@ -278,7 +381,11 @@ const USAGE = `Usage: node scripts/loop.mjs <command>
   finish N          Remove the in-progress label and move the card to Done.
   block N REASON    Label issue N blocked and comment the reason.
   comment N TEXT    Post a status comment on issue N.
-  add N             Add issue N to the board as Todo.`;
+  add N             Add issue N to the board as Todo.
+  plan N M<k> [TYPE]  Plan a triaged issue: milestone M<k>, status ready (a blocked issue
+                    stays blocked until unblock), and optionally its type (bug,
+                    feature, chore, docs or spike).
+  unblock N         Lift the blocked label (never on a checkpoint) and mark it ready.`;
 
 function usageError(message) {
   console.error(`${message}\n\n${USAGE}`);
@@ -286,34 +393,40 @@ function usageError(message) {
 }
 
 export function main(argv) {
-  const [command, rawNumber, text] = argv;
+  const [command, rawNumber, ...rest] = argv;
   if (command === "-h" || command === "--help") {
     console.log(USAGE);
     return 0;
   }
+  // args: [min, max] number of arguments after the issue number (status takes none at all).
   const commands = {
-    status: { args: 0, run: () => cmdStatus() },
-    start: { args: 1, run: (n) => cmdStart(n) },
-    finish: { args: 1, run: (n) => cmdFinish(n) },
-    add: { args: 1, run: (n) => cmdAdd(n) },
-    block: { args: 2, run: (n, t) => cmdBlock(n, t) },
-    comment: { args: 2, run: (n, t) => cmdComment(n, t) },
+    status: { args: null, run: () => cmdStatus() },
+    start: { args: [0, 0], run: (n) => cmdStart(n) },
+    finish: { args: [0, 0], run: (n) => cmdFinish(n) },
+    add: { args: [0, 0], run: (n) => cmdAdd(n) },
+    unblock: { args: [0, 0], run: (n) => cmdUnblock(n) },
+    block: { args: [1, 1], run: (n, t) => cmdBlock(n, t) },
+    comment: { args: [1, 1], run: (n, t) => cmdComment(n, t) },
+    plan: { args: [1, 2], run: (n, m, t) => cmdPlan(n, m, t) },
   };
-  const spec = commands[command];
+  const spec = Object.hasOwn(commands, command) ? commands[command] : null;
   if (!spec) return usageError(command ? `Unknown command: ${command}` : "Missing command.");
-  if (spec.args === 0) {
+  if (spec.args === null) {
     if (argv.length !== 1) return usageError("status takes no arguments.");
   } else {
-    if (argv.length !== spec.args + 1)
-      return usageError(`${command} needs ${spec.args} argument(s).`);
+    const [min, max] = spec.args;
+    if (rest.length < min || rest.length > max) {
+      const count = min === max ? `${min}` : `${min} to ${max}`;
+      return usageError(`${command} needs the issue number and ${count} more argument(s).`);
+    }
     if (!/^\d+$/.test(rawNumber ?? "")) return usageError(`Not an issue number: ${rawNumber}`);
   }
   try {
-    spec.run(Number(rawNumber), text);
+    spec.run(Number(rawNumber), ...rest);
     return 0;
   } catch (error) {
     console.error(`error: ${error.message}`);
-    return 1;
+    return error instanceof Refusal ? 2 : 1;
   }
 }
 
