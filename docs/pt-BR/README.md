@@ -22,7 +22,7 @@ Ela roda no seu computador, abre no navegador, funciona offline e guarda tudo co
 
 ## Como este projeto é feito
 
-Este projeto é dirigido pelo seu mantenedor e executado com agentes de IA para programação (Claude Code), desde o primeiro commit. O fluxo de trabalho é versionado junto com o código: o `CLAUDE.md` guarda as regras e o ciclo por issue, e `.claude/agents/` define os agentes especializados. Toda mudança passa por uma issue, uma branch, uma revisão automatizada e um pull request, e só entra depois que o mantenedor revisa e aprova.
+Este projeto é dirigido pelo seu mantenedor e executado com agentes de IA para programação (Claude Code), desde o primeiro commit. O fluxo de trabalho é versionado junto com o código: o `CLAUDE.md` guarda as regras, `.claude/skills/` guarda o ciclo por issue, e `.claude/agents/` define os agentes especializados. Toda mudança passa por uma issue, uma branch, uma revisão automatizada e um pull request, e só entra depois que o mantenedor revisa e aprova.
 
 ## Como contribuir
 
