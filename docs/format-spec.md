@@ -680,6 +680,8 @@ Staleness covers the note only. Moving or resizing a pin's region, or replacing 
 ### 15.2 Reading and migrating
 
 - Read-only commands (`tastelib validate`, reads through MCP, the app before its first write) migrate older files **in memory only**. `validate` reports `needs-migration` (info).
+- **The migrated library is checked too.** When a library is older or mixed, `validate` runs steps 1–3 of §15.3 in memory. Each file is checked against the schemas of its own version, at its path on disk. If the migration can run, the checks across files (§14, §13.4, §9) run on the migrated library, and their issues are reported at the paths and pointers the files have after the migration, which may not exist on disk yet. If errors remain after step 3, they are reported in the same way, so `validate` fails exactly when a write would refuse to migrate. If a file has errors at step 1, files below the current version take no part in the checks across files: a link into or out of one of them is neither resolved nor reported as dangling.
+- **Which files a library has.** A tool lists a library with the folder layouts of every version it supports (§5 is version 1's), so a file at a path that only an older version has is still read and migrated. Each path takes its kind from the newest version whose layout has it. A file whose own version's layout does not have its path is reported as `schema-violation` at `/formatVersion`, and like any file with errors it stops a migration (§15.3 step 1).
 - Before its first write to an older library, `tastelib` migrates the whole library on disk, automatically, and says so. `tastelib migrate` does the same on request, and `tastelib migrate --dry-run` lists what would change.
 - Library files whose version differs from `library.json` (the media marker is excluded, §6.1 and §15.1; for example, a file from a computer with another tool version arrived through Git) are reported as `mixed-format-versions` (a warning). A write to such a library runs the migration first (§15.3), which brings every file to the current version, even when `library.json` is already current.
 
@@ -719,6 +721,7 @@ The version in `library.json` is not used to decide: a migration of a library wi
 - One module per step, `packages/core/src/migrations/v<N>-to-v<N+1>.ts`, exporting a pure, deterministic, synchronous function from the whole library at version N (relative path → parsed JSON) to the whole library at version N+1. It may change, add, move or remove files. It touches only files at version N and passes others through unchanged.
 - The schemas of every released version are kept, frozen, in `packages/core/src/schemas/v<N>/`; a step validates against the schemas of its two versions, never against "current".
 - No step goes backwards: there are no down-migrations. Git history is the way back.
+- A new version never gives a path of an older version to another kind of file, so the kind of each path is the same in every version whose layout has it (§15.2).
 - Each step has the tests listed in [design.md](design.md) §15.
 
 ## 16. Validation and error reporting
