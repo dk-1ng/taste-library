@@ -80,7 +80,7 @@ git config core.hooksPath .githooks
 
 ### Toolchain
 
-The pinned versions and the reasons behind them are in `docs/design.md` §3.
+The pinned versions live in the files that `docs/design.md` §3 "Toolchain and checks" names; the reasons are in its decision log (§18).
 
 1. **Node.js 26 LTS, 26.13.0 or later.** `.nvmrc` names the line (`26`), so a version manager that reads it (nvm, fnm, Volta, mise and others) picks it up. `pnpm install` refuses an older Node.
 2. **pnpm**, installed any way you like (the standalone installer, your system package manager, or `npm install --global pnpm`). pnpm reads `packageManager` in the root `package.json`, downloads the pinned version (12.16.1) and runs that one. Corepack is not needed.
