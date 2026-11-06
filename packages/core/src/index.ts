@@ -10,6 +10,7 @@
  *   `shared.ts` for §4 of the spec, one module per file type, and `set.ts`, the schema set.
  * - `format.ts` (pure): `CURRENT_FORMAT_VERSION` and the format registry, with each version's
  *   schema set and folder layout (which relative paths are which file type).
+ * - `marker.ts` (pure): the media marker's own registry and steps (format-spec §15.1).
  * - `validation/` (pure): the `Issue` type and the codes with their severities, the mapping
  *   from zod issues to issues with pointers and English messages, the checks within one file,
  *   the checks across files, the snapshot and the report of format-spec §16.3.
@@ -22,7 +23,8 @@
  *   link that does not resolve is judged by the write pipeline in `node/write.ts`.
  * - `node/` (Node): everything that touches the operating system: listing and reading files,
  *   fingerprints, opening and refreshing a library, the atomic replace, the write pipeline and
- *   gate, media checks and the per-machine config.
+ *   gate, media checks, attaching a media folder and the media write guard (`media-folder.ts`,
+ *   `folders.ts` for folder identity and the Git walk) and the per-machine config.
  *
  * A folder is pure unless it is under `node/`; the lint rule in the root `biome.json` enforces it.
  */
@@ -40,7 +42,20 @@ export {
   resolveConfigPath,
   writeConfig,
 } from "./node/config.js";
+export { findGitWorkTree, type GitWalk, isInside } from "./node/folders.js";
 export { checkMedia, type MediaCheckOptions } from "./node/media.js";
+export {
+  type AttachLibrary,
+  type AttachOptions,
+  type AttachRefusalCode,
+  type AttachResult,
+  attachMediaFolder,
+  guardMediaWrite,
+  isIgnorableEntry,
+  MARKER_FILE,
+  type MediaGuardResult,
+  readMarker,
+} from "./node/media-folder.js";
 export { mediaPathSegments, type ResolvedMedia, resolveMediaPath } from "./node/media-path.js";
 export type {
   Library as OpenLibrary,
@@ -51,8 +66,8 @@ export type {
 } from "./node/open.js";
 export { openLibrary } from "./node/open.js";
 export type { FileBytes } from "./node/read-file.js";
-export type { StatFn } from "./node/refresh.js";
 export { MAX_JSON_BYTES, readLibraryFileBytes } from "./node/read-file.js";
+export type { StatFn } from "./node/refresh.js";
 export {
   type CheckOutcome,
   checkFile,
