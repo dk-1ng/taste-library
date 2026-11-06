@@ -81,7 +81,7 @@ The graph has no cycles. `agent-kit/` is not a workspace package and arrives in 
 - `openLibrary(root, options)` reads every library file once and returns `{ ok: true, library }` or `{ ok: false, code, message }` with `code` `not-a-library` (no `library.json`) or `unreadable-folder` (exit 2 on the command line). Long-running processes keep the `library` handle open.
 - `library.snapshot()` returns an immutable **snapshot**, refreshed first (§4 "Index"): `formatVersion` (of `library.json`, or `null`), `files` (by relative path: kind, exact bytes, fingerprint (`null` when built in memory), `formatVersion`, status `valid`, `invalid`, `newer` or `unreadable`, the parsed value when valid, and the file's issues at its own version), `migrated`, `issues` (sorted as in format-spec §16.3) and `index`. With nothing changed it returns the previous snapshot itself.
 - **The migrated view.** For an older or mixed library (format-spec §15.2) whose migration can run, `migrated` is the library as the migration would leave it, built in memory by the same steps as the migration and `--dry-run`, at migrated paths and the current version, fingerprints `null`; otherwise `null`.
-- **The report**, `reportOf(registry, snapshot, mediaIssues?)` (pure), is the format-spec §16.3 report of the snapshot's and the media issues, with `media-not-checked` when there are no media issues. With a migrated view, cross-file issues come from it, at migrated paths, saying they were found after migration to version N; when the migration cannot run, its blocking errors are reported, so the report has an error exactly when a write would refuse to migrate.
+- **The report**, `reportOf(registry, snapshot, mediaIssues?)` (pure), is the format-spec §16.3 report of the snapshot's and the media issues, with `media-not-checked` when `mediaIssues` is not given (no media folder). With a migrated view, cross-file issues come from it, at migrated paths, saying they were found after migration to version N; when the migration cannot run, its blocking errors are reported, so the report has an error exactly when a write would refuse to migrate.
 - `checkMedia(snapshot, mediaRoot, { checksums })` returns the media issues, so a refresh never hashes media.
 - `attachMediaFolder(library, path)` (§4 "Attaching a media folder") returns `attached` (`marker` `written`, `kept` or `migrated`), `refused` (a code, message and issues) or `failed` (`io-error`). `guardMediaWrite(mediaFolder, libraryId)` runs before every media write: it refuses without this library's valid marker or with a newer one (`newer-format`), and migrates an older one on disk; `readMarker` migrates in memory only. `findGitWorkTree(path)` and `isInside(inner, outer)` implement §4 "Comparing folders".
 - `library.write(build, options)` (§4 "Writing library files"): `build` gets the fresh, gated snapshot and returns a **plan** `{ changes, skipped, blockedBy? }`: `changes` an ordered list of `{ path, next }` (`next` `null` to delete), the first being the primary change (format-spec §5); `skipped` the files or folders left alone, `{ path, reason }`, passed to the result; `blockedBy` files the plan relies on unchanged. A plan that breaks its own shape throws (a bug). Pure deletion planners (pin, reference, family, guardrail, direction) build the plans of §4 "Deleting". Writes through one handle run in order; across processes the optimistic check decides. The clock is an option.
@@ -117,14 +117,14 @@ The graph has no cycles. `agent-kit/` is not a workspace package and arrives in 
 
 `library.write` writes the plan or ends with a result (§3), after the write gate (below) and every check.
 
-- **Plan.** A plan may not replace or delete a file that is not `valid`, nor depend on one through `blockedBy`: the write is refused with its issues, because only the user repairs a file with errors. A change under a folder that could not be listed is refused with that folder's issue.
+- **Plan.** A plan may not replace or delete a file that is not `valid`, nor depend on one through `blockedBy`: the write is refused with its issues, because only the user repairs a file with errors. With #92, a change under a folder that could not be listed is refused with that folder's issue.
 - **Authorize** (M3): agent writes outside the allowlist (format-spec §13.1) give `not-allowed`.
 - **Validation.** One invalid change refuses the whole plan, with the issues of every invalid file. A new link (one its entry, or its field of the same file, did not have) must resolve as the whole plan leaves the library, otherwise `dangling-link` (a warning) refuses the write; so does a new link into a file that is not `valid`. Links already dangling stay. Warnings such as `proposal-stale` never block.
 - **Timestamps.** The write sets every `updatedAt`: a changed file or entry gets the later of now and its `createdAt`; a new file, entry or pin gets `createdAt` and `updatedAt` equal to now; `createdAt` never changes; reviews set `reviewedAt` to the later of now and `proposedAt`. All files of one write get the same time. A plan that changes nothing is `unchanged` and writes nothing.
 - **Replace.** Files are written canonically (format-spec §3.3) in plan order, primary change first, each through a temporary file `.<name>.tmp-<8 Crockford characters>` in its folder. Every target is checked against the bytes read and against a new migration backup before the first rename (`write-conflict`, nothing written) and again before its own; a stop lists the files before it in `written` and the rest in `notWritten`. Format folders are created when first needed and removed again when the write ends `refused` or `failed`.
 - **Proportions.** Regions are rounded per axis to integer millionths, after validation: a valid region never becomes invalid, a tiny size never becomes 0, rounding is idempotent, a region with at most 6 decimals is never changed, and no value moves by more than 1e-6.
 - **Durability.** Every write flushes its temporary file before the rename, so a power cut leaves the previous file or the new one, never an empty one. A flush that fails after the rename is `failed`, the file counted as written. A library folder that is gone fails the write as `openLibrary` does.
-- **Links on the way to a file.** A target whose folder is outside the library, or in its `.tastelib/` or `.git/`, fails with `io-error` (operation `realpath`, `EINVAL`) before anything is touched.
+- **Links on the way to a file** (with #92). A target whose folder is outside the library, or in its `.tastelib/` or `.git/`, fails with `io-error` (operation `realpath`, `EINVAL`) before anything is touched.
 - **Windows renames and deletions.** On Windows a rename or deletion failing with `EPERM`, `EACCES` or `EBUSY` (a file held open by an antivirus, a sync client or an editor) is retried for up to 2 seconds, rechecking the target, then fails with `io-error`. A temporary file that cannot be deleted stays (`leftover-temp-file`, or the `temp-files` check of `doctor` at the top level).
 - **Cleanup only on result paths.** A write that ends `refused` or `failed` leaves no temporary file or created folder (except as just said); a process that dies, or a bug that throws, leaves the disk as it was then.
 
@@ -133,7 +133,7 @@ The graph has no cycles. `agent-kit/` is not a workspace package and arrives in 
 Before the plan is built, every write:
 
 1. **Refreshes** the snapshot (§4 "Index").
-2. **Checks the migration backup:** a `.tastelib/` that leads outside refuses with `unreadable-file`; while `.tastelib/migration-backup/` exists, the write is refused with `write-conflict` and the backup kept.
+2. **Checks the migration backup:** with #92, a `.tastelib/` that leads outside refuses with `unreadable-file`; while `.tastelib/migration-backup/` exists, the write is refused with `write-conflict` and the backup kept.
 3. **Checks `library.json`:** missing (or the folder unreadable), the write ends `failed` with `not-a-library` (or `unreadable-folder`); not `valid`, `refused` with its issues.
 4. **Refuses newer files**, with one `newer-format` issue per file.
 5. **Migrates an older or mixed library** on disk, then goes on with the notice `{ code: "migrated", from, to }`, kept whatever happens next: `to` is the current version, `from` that of `library.json`, or the lowest present when `library.json` is current. A migration that cannot run writes nothing, and the write is `refused` with the blocking files' issues.
@@ -154,7 +154,7 @@ The index is derived data, kept **in memory only**, inside the snapshot; nothing
 
 - **What it holds** (M2–M4): references with their pieces, derived state (format-spec §7.7) and `result` link; each piece's families (`to-review` ones tentative); which targets exist; and backlinks, every `(file, pointer)` linking to a target, dangling and unresolved included. An older or mixed library is indexed from the migrated view (§3).
 - **How it is built.** An updated index always equals a fresh rebuild from the same files, and the checks, the gate and the index resolve links by one rule.
-- **Freshness.** Before every answer and every write, a refresh lists the format folders and checks every file's metadata, re-reading what changed; no change is missed, even a second one within the file system's timestamp resolution (2 seconds on FAT). No `fs.watch` in M1; the M2 server may use it only as a hint.
+- **Freshness.** Before every answer and every write, a refresh lists the format folders and checks every file's metadata, re-reading what changed; the next refresh sees every change, even a second one within the file system's timestamp resolution (2 seconds on FAT). No `fs.watch` in M1; the M2 server may use it only as a hint.
 - **Performance budget**, a test on Linux, Windows and macOS CI, on a library generated with a fixed seed: 5000 references (1–2 media items, 0–5 pins, about 60% of pieces interpreted, about 3.4 KB per file), 50 families of 100 members, 300 glossary terms and one project, about 17 MB. Opening it takes **under 5 seconds**; a refresh with nothing changed, or one reference changed, **under 0.5 seconds**; one single-file write, gate and flush included, **under 1 second**. On a CI runner a line also passes within `factor × baseline + overhead` over a plain baseline timed in the same run, with constants named in the test and the same on every system. **Three runs:** each line and baseline is timed three times and the fastest is checked (§18).
 
 ### Command line
@@ -168,7 +168,7 @@ The index is derived data, kept **in memory only**, inside the snapshot; nothing
 
 #### Arguments
 
-- Usage errors (`unknown-option`, `missing-argument`, `unexpected-argument`, `invalid-argument`, "Codes") exit 2 with a message of ours, never Node's, ending "Run `tastelib <command> --help`."; `invalid-argument` names the argument.
+- Usage errors (`unknown-option`, `missing-argument`, `unexpected-argument`, `invalid-argument`, defined in "Codes") exit 2 with a message of ours, never Node's, ending "Run `tastelib <command> --help`."; `invalid-argument` names the argument.
 - A value that starts with `-` is written `--name=-value` (`--name -value` is `missing-argument`); `--` ends the options.
 - `--help` or `-h` prints text help and exits 0, whatever else is on the line, `--json` included; `tastelib --help` lists the commands, `tastelib` alone prints a usage on standard error (`missing-argument`). No negative flags, no short forms but `-h`.
 - A path argument is resolved against the current folder by its text; the config stores that string, never resolved further or Unicode-normalized (§13).
@@ -186,7 +186,7 @@ The index is derived data, kept **in memory only**, inside the snapshot; nothing
 
 **The media folder** of a command is `--media <folder>` (only `validate` has it), otherwise `mediaPath`, but only when the library in use is the configured `libraryPath`; otherwise none, and `validate` reports `media-not-checked`.
 
-**The config is read only when a command needs a value from it**, so `tastelib validate <folder> --media <folder>` runs with a broken config; otherwise a broken config is `config-error`.
+**The config is read only when a command needs a value from it**, so `tastelib validate <folder> --media <folder>` runs with a broken config; a needed value from a broken config is `config-error`.
 
 #### `tastelib init`
 
@@ -255,11 +255,11 @@ Then the folder is created if missing and the marker `{ "formatVersion": 1, "lib
 
 #### `tastelib migrate`
 
-`tastelib migrate [<library>] [--dry-run] [--json]` (#43) runs `library.migrate`: a current library writes nothing, not even `.tastelib/` (exit 0); a migration lists each file `changed`, `added` or `removed`, by path (exit 0); a refusal is `migration-blocked` (with the issues), `newer-format` or `write-conflict` (exit 1); with recovery (#39), the notice `migration-recovered`. `--dry-run` only reads and lists what `would change`, `would add` and `would remove`; a migration backup gives `migration-backup-present` (exit 1).
+`tastelib migrate [<library>] [--dry-run] [--json]` (#43) runs `library.migrate`: a current library writes nothing, not even `.tastelib/` (exit 0); a migration lists each file `changed`, `added` or `removed`, by path (exit 0); a refusal is `migration-blocked` (with the issues), `newer-format` or `write-conflict` (exit 1), a failure `io-error` (exit 2); with recovery (#39), the notice `migration-recovered`. `--dry-run` only reads and lists what `would change`, `would add` and `would remove`; a migration backup gives `migration-backup-present` (exit 1).
 
 #### `tastelib doctor --resolve-migration`
 
-`tastelib doctor --resolve-migration [<library>] [--json]` (#43) shows a migration backup (state, owner, the files a restore would put back and remove) and offers **restore** (for a manifest `in-progress` or unreadable), **delete** and **cancel**, warning that a restore overwrites files changed since. It acts only on the full word typed in a terminal (standard input and output, no `--json`), otherwise `not-interactive` (exit 2); no flag acts without it. A backup that changed meanwhile is `write-conflict` (exit 1).
+`tastelib doctor --resolve-migration [<library>] [--json]` (#43) shows a migration backup (state, owner, the files a restore would put back and remove) and offers **restore** (for a manifest `in-progress` or unreadable), **delete** and **cancel**, warning that a restore overwrites files changed since the interruption. It acts only on the full word typed in a terminal (standard input and output, no `--json`), any other answer cancelling (exit 0); without a terminal it is `not-interactive` (exit 2); no flag acts without it. A backup that changed meanwhile is `write-conflict` (exit 1).
 
 #### Output
 
@@ -298,7 +298,7 @@ Then the folder is created if missing and the marker `{ "formatVersion": 1, "lib
 
 #### Codes
 
-Next to these, the command line uses format-spec §16.2 codes (`media-folder-mismatch`, `newer-format`, `write-conflict`, `needs-migration`, `mixed-format-versions`, `media-marker-missing`, `leftover-temp-file`) unchanged; `not-a-library`, `unreadable-folder` and `io-error` come from `core` (§3).
+Next to the codes below, the command line uses format-spec §16.2 codes (`media-folder-mismatch`, `newer-format`, `write-conflict`, `needs-migration`, `mixed-format-versions`, `media-marker-missing`, `leftover-temp-file`) unchanged; `not-a-library`, `unreadable-folder` and `io-error` come from `core` (§3).
 
 | Code | Exit | Where | When |
 | --- | --- | --- | --- |
