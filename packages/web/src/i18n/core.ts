@@ -1,3 +1,12 @@
+/**
+ * The translation layer (docs/design.md section 12): original code, no dependency. One message
+ * file per language: `messages.en.ts` is the reference and defines the `MessageKey` type, and
+ * `messages.pt-BR.ts` is typed `Record<MessageKey, string>`, so `tsc` refuses a catalog that
+ * lacks a key. `translate(language, key, values)` fills `{name}` placeholders; React components
+ * get `t("key")` from `I18nProvider` and `useI18n()` in `./index.tsx` and never contain literal
+ * user-facing text. `core.test.ts` checks that every catalog has the keys of `en`, no empty
+ * message and the same placeholders.
+ */
 import { en, type MessageKey } from "./messages.en";
 import { ptBR } from "./messages.pt-BR";
 

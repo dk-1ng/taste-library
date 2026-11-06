@@ -59,6 +59,12 @@ export type WriteResult =
       notWritten: string[];
     } & Common);
 
+/**
+ * The options of `library.write`: those of the replace primitive, without what the pipeline sets
+ * for each file. Besides the replace primitive's own points, `at` is called by the pipeline with
+ * `checked` once every target is checked and before the first rename, then with `wrote:<path>` or
+ * `deleted:<path>` after each file that was written or deleted.
+ */
 export interface LibraryWriteOptions
   extends Omit<WriteOptions, "expected" | "root" | "file" | "conflictCheck"> {
   /** The time of the write; tests fix time and skew. Default: the system clock. */
