@@ -6,6 +6,8 @@ This document is the source of truth for what taste-library does. Behavior is de
 
 **Reviews grade by promises** (§14 "Threat model"). A blocker is code that breaks a promise or a contract of this document or of format-spec, or a hard rule, under a condition in scope of §14; or a change to what users or agents see that the docs do not record. Code that differs from a description of mechanism is not a blocker: the fix is to remove the description.
 
+**Size.** This document has at most 12,000 words: `pnpm docs:size` (`scripts/design-size.mjs`, part of `pnpm check`) fails above that. Raising the limit is a maintainer decision, recorded in §18.
+
 Agents and people read this document by section, the headings first (`grep -n '^#' docs/design.md`), then the sections they need (`CLAUDE.md`, "Reading the docs").
 
 Sections marked **(to specify in Mx)** are placeholders that the named milestone fills in.
