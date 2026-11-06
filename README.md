@@ -20,7 +20,7 @@ It runs on your computer, opens in your browser, works offline and stores everyt
 
 ## How this project is built
 
-This project is directed by its maintainer and executed with AI coding agents (Claude Code), and it has been since the very first commit. The workflow is versioned with the code: `CLAUDE.md` holds the rules and the per-issue loop, and `.claude/agents/` defines the specialized agents. Every change goes through an issue, a branch, an automated review and a pull request, and is merged only after the maintainer reviews and approves it.
+This project is directed by its maintainer and executed with AI coding agents (Claude Code), and it has been since the very first commit. The workflow is versioned with the code: `CLAUDE.md` holds the rules, `.claude/skills/` holds the per-issue loop, and `.claude/agents/` defines the specialized agents. Every change goes through an issue, a branch, an automated review and a pull request, and is merged only after the maintainer reviews and approves it.
 
 ## Contributing
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Helper for the per-issue loop described in CLAUDE.md.
+// Helper for the per-issue loop described in `.claude/skills/continue/SKILL.md`.
 //
 // Plain Node, no dependencies; needs the GitHub CLI (`gh`) logged in. Runs on Linux,
 // macOS and Windows: `node scripts/loop.mjs <command>`.

@@ -7,7 +7,7 @@ tools: Read, Grep, Glob, Bash
 disallowedTools: Edit, Write, NotebookEdit
 ---
 
-Read `CLAUDE.md`, `docs/design.md` (§14 "Threat model" above all) and `docs/format-spec.md` first; they are binding.
+Read `docs/design.md` §14 "Threat model" first, then the sections the issue, its plan comment and the diff touch, and the matching sections of `docs/format-spec.md` (see "Reading the docs" in `CLAUDE.md`).
 
 You are **read-only**. Never edit files, commit, push, or change labels, issues or PRs. Bash is for reading and for running checks and probes. Probe scripts go in your scratchpad, never in the repository.
 

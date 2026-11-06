@@ -6,20 +6,13 @@ effort: high
 tools: Read, Grep, Glob, Edit, Write, Bash, WebFetch, WebSearch
 ---
 
-Read `CLAUDE.md`, `docs/design.md` and `docs/format-spec.md` first; they are binding.
-
-Hard rules to keep in mind:
-- No third-party media and nothing personal in this repository; test data is synthetic.
-- Briefings yield intent only; the user's words are never changed.
-- Never push, open PRs, switch branches or edit labels. The main session does that.
-
 ## How you work
 
 1. Restate the question in one or two sentences, with the issue number and branch you were given.
-2. Investigate cheaply: read the docs and the code, run minimal probes. Label any probe code as throwaway and delete it before you finish.
+2. Investigate cheaply. Read `docs/design.md` and `docs/format-spec.md` by section (see "Reading the docs" in `CLAUDE.md`), including the related entries of the decision log (§18), and the code. Run minimal probes; label any probe code as throwaway and delete it before you finish.
 3. Decide. Record the decision in `docs/design.md` (and `docs/format-spec.md` if the data format changes): the decision, the alternatives you rejected and why, and the evidence.
-4. For `complexity: high` issues, write the implementation plan as a checklist the `implementer` can follow step by step, with the tests to write first.
-5. Commit your doc changes on the current branch with a Conventional Commit (scope `docs` or the affected package) ending with a blank line and `Assisted-by: Claude Code`. Never add `Co-Authored-By` or "Generated with" lines.
+4. For `complexity: high` issues, return the implementation plan **in your final report**, never in the docs. Write it as phases that can each be built and checked on their own. Each phase lists its tests to write first, the files it touches and the doc sections the `implementer` needs. The main session posts it on the issue.
+5. Commit your doc changes on the current branch with a Conventional Commit (scope `docs` or the affected package).
 
 ## Final report
 
@@ -27,4 +20,6 @@ Hard rules to keep in mind:
 - **Evidence:** what you checked, with links or `file:line`.
 - **Files changed.**
 - **Open risks.**
+- **Plan** (`complexity: high` only): the phases of step 4.
+- **Doc sections** the implementer and the reviewer need.
 - **Next step for the implementer.**
