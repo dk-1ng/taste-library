@@ -131,8 +131,8 @@ async function timedLine<T>(fn: () => Promise<T>): Promise<TimedRun<Line<T>>> {
 }
 
 /** The fastest of `RUNS` runs of `fn`, in milliseconds (a baseline, kept the way a line is). */
-async function fastestMs(fn: () => Promise<unknown>): Promise<number> {
-  return (await fastestOf(RUNS, () => timed(fn))).fastest.ms;
+async function fastestMs(fn: (attempt: number) => Promise<unknown>): Promise<number> {
+  return (await fastestOf(RUNS, (attempt) => timed(() => fn(attempt)))).fastest.ms;
 }
 
 const paths = (): string[] => generated.files.map((file) => join(root, ...file.split("/")));
@@ -181,7 +181,9 @@ async function measureBaselines(extra: { readParse?: boolean; durableWrite?: boo
   }
   if (extra.durableWrite) {
     const bytes = await readFile(join(root, "references", `${generated.references[2]}.json`));
-    out.durableWriteMs = await fastestMs(async () => {
+    // A target of its own in each run: a rename onto a file just written and closed can fail on
+    // Windows while a scanner holds it, and the baseline has no retry like the production write.
+    out.durableWriteMs = await fastestMs(async (attempt) => {
       const temporary = join(scratch, ".reference.json.tmp");
       const handle = await open(temporary, "wx");
       try {
@@ -190,7 +192,7 @@ async function measureBaselines(extra: { readParse?: boolean; durableWrite?: boo
       } finally {
         await handle.close();
       }
-      await rename(temporary, join(scratch, "reference.json"));
+      await rename(temporary, join(scratch, `reference-${attempt}.json`));
     });
   }
   return out;
@@ -388,16 +390,27 @@ describe("the performance budget, on 5000 generated references", () => {
     async () => {
       const id = generated.references[1] as string;
       const baselines = await measureBaselines({ durableWrite: true });
-      // Each run edits the reference again, so each one is a real write.
-      const checked = await fastestOf(RUNS, () =>
-        timedLine(() =>
+      // Each run edits the reference again, so each one is a real write. A write refreshes the
+      // library first, and the write of the run before left a file not yet settled in the cache,
+      // so that refresh would recompute the whole index: only the first run would measure "nothing
+      // changed, gate, write". So the library is settled, untimed, before each run, and each run
+      // checks that the write it timed started from that settled snapshot.
+      let settled: Snapshot | undefined;
+      const startedFrom: boolean[] = [];
+      const checked = await fastestOf(RUNS, async () => {
+        settled = await snap();
+        return timedLine(() =>
           library.write((snapshot) => {
+            startedFrom.push(snapshot === settled);
             const file = snapshot.files.get(`references/${id}.json`);
             const next = structuredClone(file?.value) as Json;
             next.note = `${next.note} Edited.`;
             return { changes: [{ path: `references/${id}.json`, next }], skipped: [] };
           }),
-        ),
+        );
+      });
+      expect(startedFrom, "every write starts from the settled snapshot").toEqual(
+        Array(RUNS).fill(true),
       );
       for (const run of checked.runs) expect(run.value.result.status).toBe("written");
       const { pass, message } = judge(
