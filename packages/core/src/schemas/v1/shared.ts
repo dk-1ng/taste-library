@@ -160,12 +160,23 @@ function patterned(pattern: RegExp, message: string): z.ZodType<string> {
 // ---- Timestamps (§4.1) ----
 
 const TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+const TIMESTAMP_FIELDS = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})\.\d{3}Z$/;
 
-/** Whether a string is a UTC timestamp with milliseconds that names a real time (it round-trips). */
+/**
+ * Whether a string is a UTC timestamp with milliseconds that names a real time: exactly the
+ * strings that round-trip through `Date` (format-spec §4.1), checked with calendar arithmetic
+ * instead, because two `Date` round trips per timestamp were a measurable part of opening a
+ * library (docs/design.md section 4, "Index", "Measured on the implementation").
+ */
 export function isTimestamp(value: string): boolean {
-  if (!TIMESTAMP.test(value)) return false;
-  const time = new Date(value).getTime();
-  return !Number.isNaN(time) && new Date(time).toISOString() === value;
+  const match = TIMESTAMP_FIELDS.exec(value);
+  if (match === null) return false;
+  return (
+    isCalendarDate(Number(match[1]), Number(match[2]), Number(match[3])) &&
+    Number(match[4]) < 24 &&
+    Number(match[5]) < 60 &&
+    Number(match[6]) < 60
+  );
 }
 
 /** `Timestamp`: UTC with milliseconds, and it must round-trip (this rejects February 30). */
