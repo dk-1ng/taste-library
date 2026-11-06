@@ -318,7 +318,13 @@ export async function attachMediaFolder(
   // 7. Parent missing.
   if (!exists) {
     try {
-      await stat(dirname(path));
+      // Where a file stands in the path, some systems say "not found" instead of "not a folder".
+      if (!(await stat(dirname(path))).isDirectory()) {
+        return refuse(
+          "not-a-folder",
+          `${dirname(path)} is not a folder. Choose or create an empty folder for media.`,
+        );
+      }
     } catch (error) {
       if ((error as { code?: unknown } | null)?.code === "ENOENT") {
         return refuse(
