@@ -103,8 +103,8 @@ The graph has no cycles. `agent-kit/` is not a workspace package and arrives in 
 ### Reading library files
 
 - **Every rule reports once:** a malformed value is reported by its own rule, and the rules across fields (duplicate ids, local links, kind against type, `updatedAt` against `createdAt`, `lastIssued`) still check the rest. Exception: a list over its maximum stops the rules of the objects above it.
-- **Links stay inside the library.** Until #92 builds it, the reader follows every link; this bullet and §14 state the behavior once built. Every file the tool reads or writes in a library, and every folder it lists or creates there, is the library's real folder or lies under it once links and junctions are resolved; the library folder itself may be a link.
-  - A file that leads outside, or into the library's own `.tastelib/` or `.git/`, is `unreadable-file` and never opened; a format folder that does so cannot be listed (`unreadable-file`, everything under it unresolved). Messages never say where a link leads. `library.json` follows the same rule, also when a command looks for its library. A `.tastelib/` that leads outside refuses every write with `unreadable-file` at `.tastelib`.
+- **Links stay inside the library.** Every file the tool reads or writes in a library, and every folder it lists or creates there, is the library's real folder or lies under it once links and junctions are resolved; the library folder itself may be a link.
+  - A file that leads outside, or into the library's own `.tastelib/` or `.git/`, is `unreadable-file` and never opened; a format folder that does so cannot be listed (`unreadable-file`, everything under it unresolved). Messages never say where a link leads. `library.json` follows the same rule, also when a command looks for its library. A `.tastelib/` that is a link or junction, wherever it leads, refuses every write with `unreadable-file` at `.tastelib`.
   - Other links that stay inside are followed. A write never follows a link at a file path: it replaces or removes the link.
   - **Setups that are not supported:** a format folder or file moved elsewhere through a link; move the whole library folder, or link the library folder itself.
 - **I/O.** Over 8 MiB is `file-too-large` (format-spec §3.2); a read error, or a path that is not a regular file, is `unreadable-file`, and a link to `/dev/zero` never hangs the reader. A file that disappears after the listing is treated as deleted. Results are ordered by path.
@@ -117,14 +117,14 @@ The graph has no cycles. `agent-kit/` is not a workspace package and arrives in 
 
 `library.write` writes the plan or ends with a result (§3), after the write gate (below) and every check.
 
-- **Plan.** A plan may not replace or delete a file that is not `valid`, nor depend on one through `blockedBy`: the write is refused with its issues, because only the user repairs a file with errors. With #92, a change under a folder that could not be listed is refused with that folder's issue.
+- **Plan.** A plan may not replace or delete a file that is not `valid`, nor depend on one through `blockedBy`: the write is refused with its issues, because only the user repairs a file with errors. A change under a folder that could not be listed is refused with that folder's issue.
 - **Authorize** (M3): agent writes outside the allowlist (format-spec §13.1) give `not-allowed`.
 - **Validation.** One invalid change refuses the whole plan, with the issues of every invalid file. A new link (one its entry, or its field of the same file, did not have) must resolve as the whole plan leaves the library, otherwise `dangling-link` (a warning) refuses the write; so does a new link into a file that is not `valid`. Links already dangling stay. Warnings such as `proposal-stale` never block.
 - **Timestamps.** The write sets every `updatedAt`: a changed file or entry gets the later of now and its `createdAt`; a new file, entry or pin gets `createdAt` and `updatedAt` equal to now; `createdAt` never changes; reviews set `reviewedAt` to the later of now and `proposedAt`. All files of one write get the same time. A plan that changes nothing is `unchanged` and writes nothing.
 - **Replace.** Files are written canonically (format-spec §3.3) in plan order, primary change first, each through a temporary file `.<name>.tmp-<8 Crockford characters>` in its folder. Every target is checked against the bytes read and against a new migration backup before the first rename (`write-conflict`, nothing written) and again before its own; a stop lists the files before it in `written` and the rest in `notWritten`. Format folders are created when first needed and removed again when the write ends `refused` or `failed` and leaves them empty.
 - **Proportions.** Regions are rounded per axis to integer millionths, after validation: a valid region never becomes invalid, a tiny size never becomes 0, rounding is idempotent, a region with at most 6 decimals is never changed, and no value moves by more than 1e-6.
 - **Durability.** Every write flushes its temporary file before the rename, so a power cut leaves the previous file or the new one, never an empty one. A flush that fails after the rename is `failed`, the file counted as written. A library folder that is gone fails the write as `openLibrary` does.
-- **Links on the way to a file** (with #92). A target whose folder is outside the library, or in its `.tastelib/` or `.git/`, fails with `io-error` (operation `realpath`, `EINVAL`) before anything is touched.
+- **Links on the way to a file.** A target whose folder is outside the library, or in its `.tastelib/` or `.git/`, fails with `io-error` (operation `realpath`, `EINVAL`) before anything is touched.
 - **Windows renames and deletions.** On Windows a rename or deletion failing with `EPERM`, `EACCES` or `EBUSY` (a file held open by an antivirus, a sync client or an editor) is retried for up to 2 seconds, rechecking the target, then fails with `io-error`. A temporary file that cannot be deleted stays (`leftover-temp-file`, or the `temp-files` check of `doctor` at the top level).
 - **Cleanup only on result paths.** A write that ends `refused` or `failed` leaves no temporary file and no created folder without a written file (except as just said); a process that dies, or a bug that throws, leaves the disk as it was then.
 
@@ -133,7 +133,7 @@ The graph has no cycles. `agent-kit/` is not a workspace package and arrives in 
 Before the plan is built, every write:
 
 1. **Refreshes** the snapshot (§4 "Index").
-2. **Checks the migration backup:** with #92, a `.tastelib/` that leads outside refuses with `unreadable-file`; while `.tastelib/migration-backup/` exists, the write is refused with `write-conflict` and the backup kept.
+2. **Checks the migration backup:** a `.tastelib/` that is a link or junction, wherever it leads, refuses with `unreadable-file` at `.tastelib`; while `.tastelib/migration-backup/` exists, the write is refused with `write-conflict` and the backup kept.
 3. **Checks `library.json`:** missing (or the folder unreadable), the write ends `failed` with `not-a-library` (or `unreadable-folder`); not `valid`, `refused` with its issues.
 4. **Refuses newer files**, with one `newer-format` issue per file.
 5. **Migrates an older or mixed library** on disk, then goes on with the notice `{ code: "migrated", from, to }`, kept whatever happens next: `to` is the current version, `from` that of `library.json`, or the lowest present when `library.json` is current. A migration that cannot run writes nothing, and the write is `refused` with the blocking files' issues.
@@ -615,7 +615,7 @@ One row per live decision: the decision in at most two lines, the alternatives r
 | 2026-11-05 | **Maintainer:** a budget line passes under its budget or within a bound over a same-run baseline. | Factors per platform. | #36 |
 | 2026-11-05 | **Maintainer:** each budget line is timed three times and the fastest run is checked. | One timing; a retry. | #84 |
 | 2026-11-05 | **Maintainer:** `CLAUDE.md` holds what every agent needs; the loop is the `continue` skill; plans stay in issues. | The loop in `CLAUDE.md`. | #85 |
-| 2026-11-06 | Reads and writes stay inside the library; a link leading out, or into `.tastelib/` or `.git/`, is `unreadable-file`. | A new issue code. | #77 |
+| 2026-11-06 | Reads and writes stay inside the library; a link leading out, or into `.tastelib/` or `.git/`, is `unreadable-file`. | A new issue code; `.tastelib/` must be a real folder. | #77 |
 | 2026-11-06 | **Maintainer:** an older or mixed library is read through its in-memory migration; listing uses every supported layout. | Per-file migrated values. | #38 |
 | 2026-11-06 | **Maintainer:** this document records promises and contracts, not mechanism, in at most 12,000 words; one row per live decision. | Behavior and contracts (#86). | #97 |
 | 2026-11-06 | **Maintainer:** reviews grade by promises (introduction, §14). | Grading mechanism text. | #97 |
