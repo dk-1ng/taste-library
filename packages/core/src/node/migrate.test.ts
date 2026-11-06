@@ -161,6 +161,7 @@ describe("library.migrate", () => {
       const copied = [...plan.changed, ...plan.removed].sort();
       const written = [...plan.changed, ...plan.added].filter((p) => p !== "library.json").sort();
       expect(points.filter((point) => !PRIMITIVE_POINTS.has(point))).toEqual([
+        "before-claim",
         "claimed",
         "owner-written",
         ...copied.map((path) => `copied:${path}`),
@@ -557,7 +558,7 @@ describe("a claim that fails leaves nothing behind", () => {
         notices: [],
       });
       expect(JSON.stringify(result)).not.toContain(library);
-      expect(points).toEqual(["claimed"]);
+      expect(points).toEqual(["before-claim", "claimed"]);
       expect(await tree(library)).toEqual(before);
     });
   });

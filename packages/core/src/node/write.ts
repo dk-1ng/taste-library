@@ -15,7 +15,7 @@ import { checkLibraryFile, type FileCheck } from "../validation/file.js";
 import { type Issue, makeIssue } from "../validation/issue.js";
 import type { Snapshot } from "../validation/library.js";
 import { sortIssues } from "../validation/report.js";
-import { type Migrated, runMigration } from "./migrate.js";
+import { type Migrated, type PendingCleanup, resumeCleanup, runMigration } from "./migrate.js";
 import { BACKUP, backupPresent } from "./migration-backup.js";
 import type { OpenFailure, SnapshotResult } from "./open.js";
 import type { Written } from "./refresh.js";
@@ -101,6 +101,12 @@ export interface WriteContext {
   hostName?: string;
   /** The process id a migration writes to `owner.json`. Default: `process.pid`. */
   pid?: number;
+  /**
+   * The handle's memory of a migration of its own whose cleanup failed too (docs/design.md section
+   * 4, "Migration runner failures"): the gate resumes it before the next write. Without it, a
+   * failed cleanup is not resumed.
+   */
+  cleanup?: { pending: PendingCleanup | null };
 }
 
 /**
@@ -158,11 +164,27 @@ const withNotices = (result: WriteResult, notices: Notice[]): WriteResult => ({
  */
 async function gate(
   context: WriteContext,
-  snapshot: Snapshot,
+  refreshed: Snapshot,
   options: LibraryWriteOptions,
 ): Promise<Gated> {
   const fs: FileSystem = options.fs ?? realFileSystem;
-  // 2. The migration backup. Until recovery is built (#39), every write gets `write-conflict`.
+  let snapshot = refreshed;
+  // 2. The migration backup. First, a cleanup of this handle's own migration that failed is
+  //    finished, as the owner, if `owner.json` still holds its bytes; it changes library files, so
+  //    the snapshot is refreshed again.
+  const memory = context.cleanup;
+  if (memory?.pending != null) {
+    const resumed = await resumeCleanup(context, memory.pending, options);
+    if (resumed.status === "refused") return { stop: refused(resumed.issues) };
+    if (resumed.status === "failed") return { stop: failed(resumed.failure) };
+    memory.pending = null;
+    if (resumed.status === "done") {
+      const fresh = await context.snapshot();
+      if (!fresh.ok) return { stop: failed({ code: fresh.code, message: fresh.message }) };
+      snapshot = fresh.snapshot;
+    }
+  }
+  //    Then the backup itself. Until recovery is built (#39), every write gets `write-conflict`.
   try {
     if (await backupPresent(context.root, fs.lstat)) {
       return {
@@ -226,8 +248,10 @@ async function gate(
     case "blocked":
       return { stop: refused([...run.issues]) };
     case "refused":
+      if (run.pending !== null && memory !== undefined) memory.pending = run.pending;
       return { stop: withNotices(refused(run.issues), run.notice === null ? [] : [run.notice]) };
     case "failed": {
+      if (run.pending !== null && memory !== undefined) memory.pending = run.pending;
       const notices = run.notice === null ? [] : [run.notice];
       if (run.notice === null && run.failure.errno === "ENOENT") {
         // The library folder or its `library.json` went away (docs/design.md section 4, "Durability").

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { lstat } from "node:fs/promises";
+import { dirname } from "node:path";
 import { FORMAT_REGISTRY, type FormatRegistry } from "../format.js";
 import { type MigrationPlan, planMigration } from "../migrations/plan.js";
 import { type Issue, makeIssue } from "../validation/issue.js";
@@ -110,7 +111,10 @@ export interface RunnerContext {
   /** Written to `owner.json` with `pid` (docs/design.md section 15, "Crash points"). */
   hostName: string;
   pid: number;
-  /** Told after each library file the runner wrote or deleted, as the pipeline's layer 9 is. */
+  /**
+   * Told after each library file the runner, or its cleanup, wrote or deleted, as the pipeline's
+   * layer 9 is.
+   */
   wrote?: (path: string, written: Written) => void;
 }
 
@@ -118,9 +122,13 @@ export interface RunnerContext {
  * The runner's options: those of the replace primitive it writes with, without what it sets for
  * each file (it always writes durably and never checks for the backup, which is its own), and
  * the clock of the claim time. Besides the replace primitive's own points, `at` is called with
- * `claimed`, `owner-written`, `copied:<path>`, `manifest-written`, `wrote:<path>`,
- * `deleted:<path>`, `library-json-written`, `done-written`, `backup-deleted:<path in the backup>`
- * (`files/<path>` for each copy, then `manifest.json`) and `owner-deleted`, in that order.
+ * `before-claim`, `claimed`, `owner-written`, `copied:<path>`, `manifest-written`,
+ * `wrote:<path>`, `deleted:<path>`, `library-json-written`, `done-written`,
+ * `backup-deleted:<path in the backup>` (`files/<path>` for each copy, then `manifest.json`) and
+ * `owner-deleted`, in that order. A cleanup (docs/design.md section 4, "Migration runner
+ * failures") calls it with `restored:<path>` after each file it restored from the backup and
+ * `removed:<path>` after each added file it removed, then with the points of the backup's
+ * deletion. `at` may return a promise, so a test can pause a run at a point.
  */
 export interface RunnerOptions
   extends Omit<WriteOptions, "expected" | "root" | "file" | "conflictCheck" | "durable"> {
@@ -141,19 +149,61 @@ export interface Migrated {
   removed: readonly string[];
 }
 
+/** A file as it was at step 1, which a cleanup puts back: its bytes and their check. */
+type Restorable = Exclude<Written, null>;
+
+/** One library file the runner replaced, deleted or added in step 5, and how a cleanup undoes it. */
+type Undo =
+  | { action: "replaced"; path: string; wrote: Uint8Array; backup: Restorable }
+  | { action: "deleted"; path: string; backup: Restorable }
+  | { action: "added"; path: string; wrote: Uint8Array };
+
+/**
+ * What a migration of this process has on disk, kept in memory only and updated as it is undone
+ * and deleted (docs/design.md section 4, "Migration runner failures"). When the runner's cleanup
+ * fails too, the handle keeps it as its pending cleanup and resumes it before its next write
+ * ({@link resumeCleanup}). Its paths come from the plan and the format's constants, never from the
+ * disk.
+ */
+export interface PendingCleanup {
+  /** The exact bytes of the `owner.json` this run wrote; `null` once it is deleted. */
+  owner: Uint8Array | null;
+  /** The copies still in the backup, by library path, with their bytes. */
+  copies: Map<string, Uint8Array>;
+  /** Every library path the run copied or meant to copy, so their folders in the backup are removed. */
+  copyPaths: readonly string[];
+  /** The bytes of `manifest.json` on disk, or `null` when there is none. */
+  manifest: Uint8Array | null;
+  /** The step-5 changes left to undo, in the order they were made; empty once undone, or at `done`. */
+  undo: Undo[];
+  /** Folders step 5 created, outermost first; removed again when left empty by the undo. */
+  createdFolders: string[];
+  /** Whether this run created `.tastelib/`, removed again when the cleanup leaves it empty. */
+  createdToolFolder: boolean;
+}
+
 /**
  * What the runner gives: `current` (nothing to migrate, nothing written), `blocked` (the migration
  * cannot run, format-spec §15.3 steps 1 and 3; nothing written, not even `.tastelib/`),
  * `migrated`, or a stop: `refused` (`write-conflict`) or `failed` (`io-error`), with the
  * `migrated` notice when the manifest was already marked `done` (docs/design.md section 3, "A
- * write result").
+ * write result"). A stop has cleaned up after itself; `pending` is set when that cleanup failed
+ * too and the backup stays, owned by this process.
  */
 export type RunnerResult =
   | { status: "current" }
   | { status: "blocked"; issues: readonly Issue[] }
   | Migrated
-  | { status: "refused"; issues: Issue[]; notice: Notice | null }
-  | { status: "failed"; failure: IoFailure; notice: Notice | null };
+  | { status: "refused"; issues: Issue[]; notice: Notice | null; pending: PendingCleanup | null }
+  | {
+      status: "failed";
+      failure: IoFailure;
+      notice: Notice | null;
+      pending: PendingCleanup | null;
+    };
+
+/** A stop, before or during a cleanup: a refusal or a failure, with no absolute path. */
+type Stop = { status: "refused"; issues: Issue[] } | { status: "failed"; failure: IoFailure };
 
 const compareText = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
@@ -169,15 +219,12 @@ function ioFailure(operation: string, file: string, errno: string): IoFailure {
 }
 
 /** A stop of the replace primitive, as the runner reports it, its message without the absolute path. */
-function stopOf(
-  outcome: Exclude<WriteOutcome, { status: "done" }>,
-  notice: Notice | null,
-): RunnerResult {
+function stopOf(outcome: Exclude<WriteOutcome, { status: "done" }>): Stop {
   if (outcome.status === "write-conflict") {
-    return { status: "refused", issues: [conflictIssue(outcome.file)], notice };
+    return { status: "refused", issues: [conflictIssue(outcome.file)] };
   }
   const { operation, file, errno } = outcome.failure;
-  return { status: "failed", failure: ioFailure(operation, file, errno), notice };
+  return { status: "failed", failure: ioFailure(operation, file, errno) };
 }
 
 function conflictIssue(file: string): Issue {
@@ -208,44 +255,70 @@ async function removeEmptyFolder(fs: FileSystem, folder: string): Promise<void> 
   }
 }
 
-type ReadBack =
-  | { status: "same"; bytes: Uint8Array }
-  | { status: "changed" }
+type Bounded =
+  | { status: "bytes"; bytes: Uint8Array }
+  | { status: "absent" }
+  /** Not a regular file, or larger than the limit. */
+  | { status: "other" }
   | { status: "failed"; errno: string };
 
 /**
- * Reads `target` from disk again and compares it with the bytes step 1 read. The size is compared
- * first, on the same handle, so a file that grew huge is never read; at most one byte more than
- * expected is read, so a file that grew after the stat is a change too.
+ * Reads `target` when it is a regular file of at most `limit` bytes. The size is checked first, on
+ * the same handle, so a file that grew huge is never read; at most one byte more than the limit is
+ * read, so a file that grew after the stat is `other` too.
  */
-async function readBack(fs: FileSystem, target: string, expected: Uint8Array): Promise<ReadBack> {
+async function readBounded(fs: FileSystem, target: string, limit: number): Promise<Bounded> {
   try {
     // Non-blocking, as the reader does: a FIFO at the path must not hang the open.
     const handle = await fs.open(target, constants.O_RDONLY | (constants.O_NONBLOCK ?? 0));
     try {
       const info = await handle.stat();
-      if (!info.isFile() || info.size !== expected.byteLength) return { status: "changed" };
-      const buffer = new Uint8Array(expected.byteLength + 1);
+      if (!info.isFile() || info.size > limit) return { status: "other" };
+      const buffer = new Uint8Array(limit + 1);
       let length = 0;
       while (length < buffer.length) {
         const { bytesRead } = await handle.read(buffer, length, buffer.length - length, length);
         if (bytesRead === 0) break;
         length += bytesRead;
       }
-      const bytes = buffer.subarray(0, length);
-      const same =
-        length === expected.byteLength && bytes.every((byte, index) => byte === expected[index]);
-      return same ? { status: "same", bytes } : { status: "changed" };
+      if (length > limit) return { status: "other" };
+      return { status: "bytes", bytes: buffer.slice(0, length) };
     } finally {
       await handle.close();
     }
   } catch (error) {
     const errno = errnoOf(error);
     if (errno === undefined) throw error;
-    // A file that disappeared since step 1 changed too.
-    if (errno === "ENOENT") return { status: "changed" };
+    if (errno === "ENOENT") return { status: "absent" };
     return { status: "failed", errno };
   }
+}
+
+/** Whether the change reached the disk: done, or failed only at the folder flush after it (applied). */
+const reached = (
+  outcome: WriteOutcome,
+): outcome is Exclude<WriteOutcome, { status: "write-conflict" }> =>
+  outcome.status === "done" || (outcome.status === "failed" && outcome.applied);
+
+const sameBytes = (a: Uint8Array, b: Uint8Array): boolean =>
+  a.byteLength === b.byteLength && a.every((byte, index) => byte === b[index]);
+
+type ReadBack =
+  | { status: "same"; bytes: Uint8Array }
+  | { status: "changed" }
+  | { status: "failed"; errno: string };
+
+/**
+ * Reads `target` from disk again and compares it with the bytes step 1 read. A file that
+ * disappeared, grew or is no longer a regular file changed too.
+ */
+async function readBack(fs: FileSystem, target: string, expected: Uint8Array): Promise<ReadBack> {
+  const read = await readBounded(fs, target, expected.byteLength);
+  if (read.status === "failed") return read;
+  if (read.status === "bytes" && sameBytes(read.bytes, expected)) {
+    return { status: "same", bytes: read.bytes };
+  }
+  return { status: "changed" };
 }
 
 /** The folders under the backup's `files/` that hold the copies, deepest first, `files/` last. */
@@ -264,6 +337,241 @@ function copyFolders(copied: readonly string[]): string[] {
   ];
 }
 
+/** What a cleanup needs: where, through what, and whom to tell about the library files it changes. */
+interface CleanupContext {
+  root: string;
+  fs: FileSystem;
+  platform: NodeJS.Platform;
+  at: (point: string) => void | Promise<void>;
+  /** The replace primitive's options that the cleanup passes through (randomness, clocks, sleep, `at`). */
+  primitive: Omit<RunnerOptions, "clock">;
+  wrote?: (path: string, written: Written) => void;
+}
+
+/** The replace primitive's options for one file of the cleanup. */
+function optionsFor(
+  ctx: CleanupContext,
+  file: string,
+  expected: Expected,
+  durable: boolean,
+): WriteOptions {
+  return {
+    ...ctx.primitive,
+    fs: ctx.fs,
+    platform: ctx.platform,
+    root: ctx.root,
+    durable,
+    file,
+    expected,
+  };
+}
+
+/** Where a file of the undo list stands in a resumed cleanup. */
+type UndoState = "to-undo" | "undone" | "other";
+
+/**
+ * The state of a file of the undo list, in the two states a resumed cleanup accepts
+ * (docs/design.md section 4, "Migration runner failures"): a replaced file holds the runner's bytes
+ * (to restore) or the backup's (restored); a deleted file is absent (to restore) or holds the
+ * backup's bytes (restored); an added file holds the runner's bytes (to remove) or is absent
+ * (removed). Anything else is `other`.
+ */
+async function undoStateOf(
+  ctx: CleanupContext,
+  entry: Undo,
+): Promise<UndoState | { errno: string }> {
+  const limit = Math.max(
+    entry.action === "deleted" ? 0 : entry.wrote.byteLength,
+    entry.action === "added" ? 0 : entry.backup.bytes.byteLength,
+  );
+  const read = await readBounded(ctx.fs, pathIn(ctx.root, entry.path), limit);
+  if (read.status === "failed") return { errno: read.errno };
+  const holds = (bytes: Uint8Array): boolean =>
+    read.status === "bytes" && sameBytes(read.bytes, bytes);
+  switch (entry.action) {
+    case "replaced":
+      return holds(entry.wrote) ? "to-undo" : holds(entry.backup.bytes) ? "undone" : "other";
+    case "deleted":
+      return read.status === "absent" ? "to-undo" : holds(entry.backup.bytes) ? "undone" : "other";
+    case "added":
+      return holds(entry.wrote) ? "to-undo" : read.status === "absent" ? "undone" : "other";
+  }
+}
+
+/**
+ * Undoes the step-5 changes of `left`, in the order they were made: each replaced or deleted file
+ * is restored from the backup, checked first against the bytes the runner wrote (or against its
+ * absence), and each added file is removed, checked the same way, every one durably. A resumed
+ * cleanup first checks every file and refuses before changing anything when one is in a state it
+ * does not accept; a file it finds already undone has its folder flushed, since the interrupted
+ * cleanup may have stopped before that flush. Then the folders step 5 created are removed when
+ * empty. Returns `null` once everything is undone.
+ */
+async function undoChanges(
+  ctx: CleanupContext,
+  left: PendingCleanup,
+  resumed: boolean,
+): Promise<Stop | null> {
+  const states: UndoState[] = [];
+  if (resumed) {
+    for (const entry of left.undo) {
+      const state = await undoStateOf(ctx, entry);
+      if (typeof state === "object") {
+        return { status: "failed", failure: ioFailure("read", entry.path, state.errno) };
+      }
+      if (state === "other") {
+        const issue = makeIssue(
+          "write-conflict",
+          entry.path,
+          null,
+          "The file changed after a migration of this process stopped, so its cleanup cannot finish; the migration backup was kept. See `tastelib doctor --resolve-migration`.",
+        );
+        return { status: "refused", issues: [issue] };
+      }
+      states.push(state);
+    }
+  }
+  for (const [index, entry] of left.undo.entries()) {
+    const target = pathIn(ctx.root, entry.path);
+    if (states[index] === "undone") {
+      if (ctx.platform === "win32") continue;
+      try {
+        await flushFolder(ctx.fs, dirname(target));
+      } catch (error) {
+        const errno = errnoOf(error);
+        if (errno === undefined) throw error;
+        if (errno !== "ENOENT") {
+          return { status: "failed", failure: ioFailure("sync-folder", entry.path, errno) };
+        }
+      }
+      continue;
+    }
+    const outcome =
+      entry.action === "added"
+        ? await removeFile(target, {
+            ...optionsFor(ctx, entry.path, entry.wrote, true),
+            expected: entry.wrote,
+          })
+        : await replaceFile(
+            target,
+            entry.backup.bytes,
+            optionsFor(ctx, entry.path, entry.action === "replaced" ? entry.wrote : "absent", true),
+          );
+    if (reached(outcome)) {
+      ctx.wrote?.(entry.path, entry.action === "added" ? null : entry.backup);
+    }
+    if (outcome.status !== "done") return stopOf(outcome);
+    await ctx.at(`${entry.action === "added" ? "removed" : "restored"}:${entry.path}`);
+  }
+  for (const folder of [...left.createdFolders].reverse()) await removeEmptyFolder(ctx.fs, folder);
+  left.undo = [];
+  left.createdFolders = [];
+  return null;
+}
+
+/**
+ * Deletes the backup in the order of format-spec §15.3 step 7: the copies and the manifest, the
+ * copies' folders, `owner.json` last, then the folder. Each file is checked against the bytes this
+ * run wrote, and forgotten once deleted, so a deletion that stopped can be run again. Nothing here
+ * needs to be durable: a backup marked `done` is deleted by recovery whatever is left of it
+ * (format-spec §15.3, case 5), and any other is deleted only once every library file this run
+ * changed is back, durably, so what recovery would do with what is left of it changes nothing.
+ */
+async function deleteBackup(ctx: CleanupContext, left: PendingCleanup): Promise<Stop | null> {
+  const remove = async (file: string, expected: Uint8Array): Promise<Stop | null> => {
+    const outcome = await removeFile(pathIn(ctx.root, file), {
+      ...optionsFor(ctx, file, expected, false),
+      expected,
+    });
+    return outcome.status === "done" ? null : stopOf(outcome);
+  };
+  for (const [path, bytes] of [...left.copies]) {
+    const stopped = await remove(copyPathOf(path), bytes);
+    if (stopped !== null) return stopped;
+    left.copies.delete(path);
+    await ctx.at(`backup-deleted:files/${path}`);
+  }
+  if (left.manifest !== null) {
+    const stopped = await remove(MANIFEST_FILE, left.manifest);
+    if (stopped !== null) return stopped;
+    left.manifest = null;
+    await ctx.at("backup-deleted:manifest.json");
+  }
+  for (const folder of copyFolders(left.copyPaths)) {
+    try {
+      await ctx.fs.rmdir(pathIn(ctx.root, folder));
+    } catch (error) {
+      const errno = errnoOf(error);
+      if (errno === undefined) throw error;
+      // A folder no copy was written to, or that a stopped deletion already removed.
+      if (errno !== "ENOENT")
+        return { status: "failed", failure: ioFailure("rmdir", folder, errno) };
+    }
+  }
+  if (left.owner !== null) {
+    const stopped = await remove(OWNER_FILE, left.owner);
+    if (stopped !== null) return stopped;
+    left.owner = null;
+    await ctx.at("owner-deleted");
+  }
+  try {
+    await ctx.fs.rmdir(pathIn(ctx.root, BACKUP));
+  } catch (error) {
+    const errno = errnoOf(error);
+    if (errno === undefined) throw error;
+    if (errno !== "ENOENT") return { status: "failed", failure: ioFailure("rmdir", BACKUP, errno) };
+  }
+  return null;
+}
+
+/**
+ * The cleanup of a migration that stopped after `owner.json` was written (docs/design.md section
+ * 4, "Migration runner failures"): it undoes what is left of step 5, deletes the backup and then
+ * the `.tastelib/` this run created, if it is empty. Returns `null` once done, or the stop that
+ * ended it, with `left` updated to what is still on disk.
+ */
+async function cleanUp(
+  ctx: CleanupContext,
+  left: PendingCleanup,
+  resumed: boolean,
+): Promise<Stop | null> {
+  const undone = await undoChanges(ctx, left, resumed);
+  if (undone !== null) return undone;
+  const deleted = await deleteBackup(ctx, left);
+  if (deleted !== null) return deleted;
+  if (left.createdToolFolder) await removeEmptyFolder(ctx.fs, pathIn(ctx.root, TOOL_FOLDER));
+  return null;
+}
+
+/** The cleanup context of a run or a resumed cleanup with `options`. */
+function cleanupContext(
+  root: string,
+  wrote: RunnerContext["wrote"],
+  options: RunnerOptions,
+): CleanupContext {
+  const { clock: _clock, ...primitive } = options;
+  return {
+    root,
+    fs: options.fs ?? realFileSystem,
+    platform: options.platform ?? process.platform,
+    at: options.at ?? (() => undefined),
+    primitive,
+    wrote,
+  };
+}
+
+/** The message of a stop whose cleanup failed too, so the user knows the backup stayed. */
+function backupKept(stop: Stop): Stop {
+  const kept = " The migration backup was kept; see `tastelib doctor`.";
+  if (stop.status === "failed") {
+    return { ...stop, failure: { ...stop.failure, message: `${stop.failure.message}${kept}` } };
+  }
+  return {
+    ...stop,
+    issues: stop.issues.map((issue) => ({ ...issue, message: `${issue.message}${kept}` })),
+  };
+}
+
 /**
  * Migrates the library on disk (format-spec §15.3): plans steps 1 to 3 from `snapshot` (the
  * gate's fresh snapshot), then claims `.tastelib/migration-backup/` with a non-recursive `mkdir`
@@ -273,9 +581,14 @@ function copyFolders(copied: readonly string[]): string[] {
  * the backup, `owner.json` last. Every file of steps 4 to 6 is flushed before its rename and every
  * folder it touched after it (docs/design.md section 4, "Durability"; not on Windows).
  *
- * Expected failures are results, never thrown. A stop before `owner.json` exists removes the
- * empty claim again; a stop after it leaves the backup as it is, owned by this process, which
- * recovery resolves once this process has ended (format-spec §15.3, cases 5 to 7).
+ * Expected failures are results, never thrown. A stop cleans up after itself before it returns,
+ * only on these result paths (docs/design.md section 4, "Migration runner failures" and "Cleanup
+ * only on result paths"): before `owner.json` exists it removes the empty claim; before the
+ * manifest, it deletes the backup; with the manifest `in-progress`, it undoes, from the list it
+ * keeps in memory, only what this run did, then deletes the backup; with the manifest `done`, it
+ * deletes the backup and the library stays migrated. When that cleanup fails too, the backup stays,
+ * owned by this process, and the result's `pending` says what is left. Any other exception (a bug,
+ * or a test's simulated crash) propagates with nothing cleaned up.
  *
  * @throws when a step gives a path that is not a safe relative path of the format (a step bug,
  *   docs/design.md section 14), or when the injected owner is not valid.
@@ -295,30 +608,35 @@ export async function runMigration(
   }
 
   const { root } = context;
-  const { clock, ...primitive } = options;
-  const fs = options.fs ?? realFileSystem;
-  const platform = options.platform ?? process.platform;
-  const at = options.at ?? (() => undefined);
+  const ctx = cleanupContext(root, context.wrote, options);
+  const { fs, platform, at } = ctx;
   const owner = ownerSchema.parse({
     pid: context.pid,
     host: context.hostName,
-    claimedAt: (clock?.() ?? new Date()).toISOString(),
+    claimedAt: (options.clock?.() ?? new Date()).toISOString(),
   });
-  const durably = (file: string, expected: Expected): WriteOptions => ({
-    ...primitive,
-    fs,
-    platform,
-    root,
-    durable: true,
-    file,
-    expected,
-  });
-  const before = (path: string): Uint8Array => {
-    const bytes = snapshot.files.get(path)?.bytes;
-    if (bytes === undefined || bytes === null) throw new Error(`"${path}" was never read.`);
-    return bytes;
+  const durably = (file: string, expected: Expected): WriteOptions =>
+    optionsFor(ctx, file, expected, true);
+  const entryOf = (path: string): Restorable => {
+    const file = snapshot.files.get(path);
+    if (file?.bytes === undefined || file.bytes === null)
+      throw new Error(`"${path}" was never read.`);
+    return {
+      kind: file.kind,
+      bytes: file.bytes,
+      check: {
+        status: file.status,
+        formatVersion: file.formatVersion,
+        value: file.value,
+        issues: [...file.issues],
+      },
+    };
   };
+  const before = (path: string): Uint8Array => entryOf(path).bytes;
   const durableFolders = platform !== "win32";
+  const copied = [...plan.changed, ...plan.removed].sort(compareText);
+
+  await at("before-claim");
 
   // 4. Claim: `.tastelib/` first, then the backup folder, which only one process can create.
   const toolFolder = pathIn(root, TOOL_FOLDER);
@@ -331,13 +649,19 @@ export async function runMigration(
     const errno = errnoOf(error);
     if (errno === undefined) throw error;
     if (errno !== "EEXIST") {
-      return { status: "failed", failure: ioFailure("mkdir", TOOL_FOLDER, errno), notice: null };
+      return {
+        status: "failed",
+        failure: ioFailure("mkdir", TOOL_FOLDER, errno),
+        notice: null,
+        pending: null,
+      };
     }
   }
-  /** Removes the claim while it is still empty (no `owner.json` was written). */
-  const releaseClaim = async (): Promise<void> => {
+  /** Ends a run stopped before `owner.json` exists: the claim is still empty and is removed. */
+  const releaseClaim = async (stop: Stop): Promise<RunnerResult> => {
     await removeEmptyFolder(fs, backupFolder);
     if (createdToolFolder) await removeEmptyFolder(fs, toolFolder);
+    return { ...stop, notice: null, pending: null };
   };
   try {
     await fs.mkdir(backupFolder);
@@ -352,9 +676,14 @@ export async function runMigration(
         null,
         "Another migration claimed the backup folder first; nothing was written. Try again later, or see `tastelib doctor`.",
       );
-      return { status: "refused", issues: [issue], notice: null };
+      return { status: "refused", issues: [issue], notice: null, pending: null };
     }
-    return { status: "failed", failure: ioFailure("mkdir", BACKUP, errno), notice: null };
+    return {
+      status: "failed",
+      failure: ioFailure("mkdir", BACKUP, errno),
+      notice: null,
+      pending: null,
+    };
   }
   // The claim's folder entries: the backup folder in `.tastelib/`, and `.tastelib/` in the
   // library folder when this run created it.
@@ -368,8 +697,10 @@ export async function runMigration(
       } catch (error) {
         const errno = errnoOf(error);
         if (errno === undefined) throw error;
-        await releaseClaim();
-        return { status: "failed", failure: ioFailure("sync-folder", name, errno), notice: null };
+        return releaseClaim({
+          status: "failed",
+          failure: ioFailure("sync-folder", name, errno),
+        });
       }
     }
   }
@@ -381,29 +712,46 @@ export async function runMigration(
     ownerBytes,
     durably(OWNER_FILE, "absent"),
   );
-  if (ownerWrite.status !== "done") {
-    // Without `owner.json` the claim is still empty and can be removed; with it (only its folder
-    // flush failed), it stays, owned by this process.
-    if (!(ownerWrite.status === "failed" && ownerWrite.applied)) await releaseClaim();
-    return stopOf(ownerWrite, null);
+  // Without `owner.json` the claim is still empty and can be removed; with it (only its folder
+  // flush failed), the backup is deleted like any other below.
+  if (ownerWrite.status !== "done" && !(ownerWrite.status === "failed" && ownerWrite.applied)) {
+    return releaseClaim(stopOf(ownerWrite));
   }
+
+  // From here on, everything this run puts on disk is recorded, so a stop can undo it.
+  const left: PendingCleanup = {
+    owner: ownerBytes,
+    copies: new Map(),
+    copyPaths: copied,
+    manifest: null,
+    undo: [],
+    createdFolders: [],
+    createdToolFolder,
+  };
+  let notice: Notice | null = null;
+  /** Ends a stopped run: cleans up, and keeps what is left when the cleanup fails too. */
+  const stop = async (stopped: Stop): Promise<RunnerResult> => {
+    const failed = await cleanUp(ctx, left, false);
+    if (failed === null) return { ...stopped, notice, pending: null };
+    return { ...backupKept(stopped), notice, pending: left.owner === null ? null : left };
+  };
+  if (ownerWrite.status !== "done") return stop(stopOf(ownerWrite));
   await at("owner-written");
 
   // The copies: every file that will change or be deleted, read from disk again after the claim.
-  const copied = [...plan.changed, ...plan.removed].sort(compareText);
-  const copies = new Map<string, Uint8Array>();
   for (const path of copied) {
     const read = await readBack(fs, pathIn(root, path), before(path));
-    if (read.status === "changed") {
-      return { status: "refused", issues: [conflictIssue(path)], notice: null };
-    }
+    if (read.status === "changed")
+      return stop({ status: "refused", issues: [conflictIssue(path)] });
     if (read.status === "failed") {
-      return { status: "failed", failure: ioFailure("read", path, read.errno), notice: null };
+      return stop({ status: "failed", failure: ioFailure("read", path, read.errno) });
     }
     const copy = copyPathOf(path);
     const written = await replaceFile(pathIn(root, copy), read.bytes, durably(copy, "absent"));
-    if (written.status !== "done") return stopOf(written, null);
-    copies.set(path, read.bytes);
+    if (reached(written)) {
+      left.copies.set(path, read.bytes);
+    }
+    if (written.status !== "done") return stop(stopOf(written));
     await at(`copied:${path}`);
   }
 
@@ -418,17 +766,31 @@ export async function runMigration(
     inProgress,
     durably(MANIFEST_FILE, "absent"),
   );
-  if (manifestWrite.status !== "done") return stopOf(manifestWrite, null);
+  if (reached(manifestWrite)) {
+    left.manifest = inProgress;
+  }
+  if (manifestWrite.status !== "done") return stop(stopOf(manifestWrite));
   await at("manifest-written");
 
-  // 5. The changed and added files, then the deletions, and `library.json` last.
+  // 5. The changed and added files, then the deletions, and `library.json` last. Each file that
+  //    reached the disk (a failed flush marked applied included) joins the undo list.
   const writeFile = async (path: string): Promise<RunnerResult | null> => {
     const bytes = plan.bytes.get(path);
     const file = plan.migrated.files.get(path);
     if (bytes === undefined || file === undefined) throw new Error(`"${path}" was not planned.`);
-    const expected = snapshot.files.get(path)?.bytes ?? "absent";
-    const outcome = await replaceFile(pathIn(root, path), bytes, durably(path, expected));
-    if (outcome.status === "done" || (outcome.status === "failed" && outcome.applied)) {
+    const existed = snapshot.files.has(path);
+    const outcome = await replaceFile(
+      pathIn(root, path),
+      bytes,
+      durably(path, existed ? before(path) : "absent"),
+    );
+    if (reached(outcome)) {
+      left.undo.push(
+        existed
+          ? { action: "replaced", path, wrote: bytes, backup: entryOf(path) }
+          : { action: "added", path, wrote: bytes },
+      );
+      left.createdFolders.push(...outcome.createdFolders);
       context.wrote?.(path, {
         kind: file.kind,
         bytes,
@@ -440,7 +802,7 @@ export async function runMigration(
         },
       });
     }
-    return outcome.status === "done" ? null : stopOf(outcome, null);
+    return outcome.status === "done" ? null : stop(stopOf(outcome));
   };
   const writes = [...plan.changed, ...plan.added]
     .filter((path) => path !== "library.json")
@@ -455,10 +817,11 @@ export async function runMigration(
       ...durably(path, "absent"),
       expected: before(path),
     });
-    if (outcome.status === "done" || (outcome.status === "failed" && outcome.applied)) {
+    if (reached(outcome)) {
+      left.undo.push({ action: "deleted", path, backup: entryOf(path) });
       context.wrote?.(path, null);
     }
-    if (outcome.status !== "done") return stopOf(outcome, null);
+    if (outcome.status !== "done") return stop(stopOf(outcome));
     await at(`deleted:${path}`);
   }
   if (plan.changed.includes("library.json")) {
@@ -467,60 +830,25 @@ export async function runMigration(
     await at("library-json-written");
   }
 
-  // 6. The manifest marked `done`: from here on the library is migrated.
-  const notice: Notice = { code: "migrated", from: plan.from, to: plan.to };
+  // 6. The manifest marked `done`: from here on the library is migrated, and nothing is undone.
   const done = backupFileBytes({ ...manifest, state: "done" });
   const doneWrite = await replaceFile(
     pathIn(root, MANIFEST_FILE),
     done,
     durably(MANIFEST_FILE, inProgress),
   );
-  if (doneWrite.status !== "done") {
-    return stopOf(doneWrite, doneWrite.status === "failed" && doneWrite.applied ? notice : null);
+  if (reached(doneWrite)) {
+    left.manifest = done;
+    left.undo = [];
+    left.createdFolders = [];
+    notice = { code: "migrated", from: plan.from, to: plan.to };
   }
+  if (doneWrite.status !== "done") return stop(stopOf(doneWrite));
   await at("done-written");
 
-  // 7. Delete the backup: the copies and the manifest, the copies' folders, `owner.json` last,
-  //    then the folder. Nothing here needs to be durable: a backup marked `done` is deleted by
-  //    recovery whatever is left of it (format-spec §15.3, case 5).
-  const remove = async (file: string, expected: Uint8Array): Promise<RunnerResult | null> => {
-    const outcome = await removeFile(pathIn(root, file), {
-      ...primitive,
-      fs,
-      platform,
-      durable: false,
-      file,
-      expected,
-    });
-    return outcome.status === "done" ? null : stopOf(outcome, notice);
-  };
-  for (const path of copied) {
-    const stopped = await remove(copyPathOf(path), copies.get(path) as Uint8Array);
-    if (stopped !== null) return stopped;
-    await at(`backup-deleted:files/${path}`);
-  }
-  const manifestRemoved = await remove(MANIFEST_FILE, done);
-  if (manifestRemoved !== null) return manifestRemoved;
-  await at("backup-deleted:manifest.json");
-  for (const folder of copyFolders(copied)) {
-    try {
-      await fs.rmdir(pathIn(root, folder));
-    } catch (error) {
-      const errno = errnoOf(error);
-      if (errno === undefined) throw error;
-      return { status: "failed", failure: ioFailure("rmdir", folder, errno), notice };
-    }
-  }
-  const ownerRemoved = await remove(OWNER_FILE, ownerBytes);
-  if (ownerRemoved !== null) return ownerRemoved;
-  await at("owner-deleted");
-  try {
-    await fs.rmdir(backupFolder);
-  } catch (error) {
-    const errno = errnoOf(error);
-    if (errno === undefined) throw error;
-    return { status: "failed", failure: ioFailure("rmdir", BACKUP, errno), notice };
-  }
+  // 7. Delete the backup, `owner.json` last; a deletion that stops is run again by the cleanup.
+  const deleted = await deleteBackup(ctx, left);
+  if (deleted !== null) return stop(deleted);
   return {
     status: "migrated",
     from: plan.from,
@@ -529,4 +857,40 @@ export async function runMigration(
     added: plan.added,
     removed: plan.removed,
   };
+}
+
+/**
+ * What resuming a pending cleanup gives: `done` (the backup is gone), `not-owner` (`owner.json`
+ * no longer holds the bytes this process wrote, so the backup is not this process's to clean up and
+ * nothing was done), or a stop that keeps the backup: `refused` (`write-conflict`, a file in a state
+ * the cleanup does not accept) or `failed` (`io-error`).
+ */
+export type ResumeResult =
+  | { status: "done" }
+  | { status: "not-owner" }
+  | { status: "refused"; issues: Issue[] }
+  | { status: "failed"; failure: IoFailure };
+
+/**
+ * Resumes, as the owner, a cleanup that failed in this process (docs/design.md section 4,
+ * "Migration runner failures"), before the handle's next write: only if `owner.json` still holds
+ * exactly the bytes this process wrote. A file of the undo list is accepted in exactly two states
+ * (still as the runner left it, or already undone); any other state refuses before anything is
+ * changed, and the backup stays. `pending` is updated to what is left.
+ */
+export async function resumeCleanup(
+  context: Pick<RunnerContext, "root" | "wrote">,
+  pending: PendingCleanup,
+  options: RunnerOptions = {},
+): Promise<ResumeResult> {
+  const ctx = cleanupContext(context.root, context.wrote, options);
+  if (pending.owner === null) return { status: "not-owner" };
+  const owner = await readBounded(ctx.fs, pathIn(ctx.root, OWNER_FILE), pending.owner.byteLength);
+  if (owner.status === "failed") {
+    return { status: "failed", failure: ioFailure("read", OWNER_FILE, owner.errno) };
+  }
+  if (owner.status !== "bytes" || !sameBytes(owner.bytes, pending.owner)) {
+    return { status: "not-owner" };
+  }
+  return (await cleanUp(ctx, pending, true)) ?? { status: "done" };
 }

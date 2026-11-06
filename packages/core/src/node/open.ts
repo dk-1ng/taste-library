@@ -104,6 +104,9 @@ export async function openLibrary(root: string, options: OpenOptions = {}): Prom
     wrote: refresher.wrote,
     hostName: options.hostName,
     pid: options.pid,
+    // The handle remembers a failed cleanup of its own migration, with the bytes of its
+    // `owner.json`, and finishes it before its next write (docs/design.md section 4).
+    cleanup: { pending: null },
   };
   let queue: Promise<unknown> = Promise.resolve();
   /** Runs `task` after every write or migration queued before it, one at a time. */
