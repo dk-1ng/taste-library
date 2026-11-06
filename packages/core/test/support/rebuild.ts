@@ -38,7 +38,7 @@ function comparableIndex(index: LibraryIndex) {
   };
 }
 
-function comparableSnapshot(snapshot: Snapshot) {
+function comparableSnapshot(snapshot: Snapshot): unknown {
   return {
     formatVersion: snapshot.formatVersion,
     files: [...snapshot.files].map(([path, file]) => [
@@ -51,6 +51,7 @@ function comparableSnapshot(snapshot: Snapshot) {
     issues: snapshot.issues,
     unlistedFolders: snapshot.unlistedFolders,
     index: comparableIndex(snapshot.index),
+    migrated: snapshot.migrated === null ? null : comparableSnapshot(snapshot.migrated),
   };
 }
 

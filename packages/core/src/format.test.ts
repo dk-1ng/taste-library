@@ -3,11 +3,14 @@ import { TEST_REGISTRY } from "../test/support/registry.js";
 import {
   applySteps,
   classifyEntry,
+  classifyListedEntry,
   currentLayout,
   FORMAT_REGISTRY,
   type FormatLayout,
   type FormatRegistry,
   type FormatVersionSpec,
+  kindOfPath,
+  layoutKindOf,
 } from "./format.js";
 import type { LibraryValues } from "./migrations/steps.js";
 
@@ -89,6 +92,101 @@ describe("classifyEntry", () => {
     });
     expect(layout.identityOf("projects/landing/directions.json", "directions")).toBeNull();
     expect(layout.identityOf("glossary.json", "glossary")).toBeNull();
+  });
+});
+
+describe("classifyListedEntry (the union of the layouts of every version, format-spec §15.2)", () => {
+  const listed = (registry: FormatRegistry, parent: string, name: string, directory = false) =>
+    classifyListedEntry(registry, parent, name, directory);
+
+  it("gives what version 1's layout gives in the production registry", () => {
+    for (const [parent, name, directory] of [
+      ["", "library.json", false],
+      ["", "glossary.json", false],
+      ["", "references", true],
+      ["", "references", false],
+      ["", "README.md", false],
+      ["", "constructor", true],
+      ["references", "ref-20261104-k3x9ab.json", false],
+      ["references", "notes.txt", false],
+      ["references", ".x.json.tmp-0a1b2c3d", false],
+      ["projects", "landing", true],
+      ["projects/landing", "project.json", false],
+      ["projects/landing", "other.json", false],
+      ["glossary", "term-2b4d6f.json", false],
+    ] as const) {
+      expect(listed(FORMAT_REGISTRY, parent, name, directory), `${parent}/${name}`).toEqual(
+        classify(parent, name, directory),
+      );
+    }
+  });
+
+  it("lists a path that only an older version has, and a path that only the newer one has", () => {
+    // glossary.json is a file of version 1 only; glossary/<term-id>.json of version 2 only.
+    expect(listed(TEST_REGISTRY, "", "glossary.json")).toEqual({ type: "file", kind: "glossary" });
+    expect(listed(TEST_REGISTRY, "", "glossary", true)).toEqual({ type: "folder" });
+    expect(listed(TEST_REGISTRY, "glossary", "term-2b4d6f.json")).toEqual({
+      type: "file",
+      kind: "glossary-term",
+    });
+    expect(listed(TEST_REGISTRY, "references", "ref-20261104-k3x9ab.json")).toEqual({
+      type: "file",
+      kind: "reference",
+    });
+    expect(listed(TEST_REGISTRY, "glossary", "notes.txt")).toEqual({ type: "unexpected" });
+    expect(listed(TEST_REGISTRY, "glossary", ".x.json.tmp-0a1b2c3d")).toEqual({
+      type: "leftover-temp-file",
+    });
+    expect(listed(TEST_REGISTRY, "", "README.md")).toEqual({ type: "ignore" });
+    expect(listed(TEST_REGISTRY, "", "glossary")).toEqual({ type: "ignore" });
+  });
+
+  it("takes each path's kind from the newest version whose layout has it", () => {
+    const v1 = FORMAT_REGISTRY.versions[1] ?? fail("no version 1");
+    const renamed: FormatVersionSpec = {
+      ...v1,
+      layout: { ...v1.layout, files: { ...v1.layout.files, "guardrails.json": "rules" } },
+    };
+    const registry: FormatRegistry = {
+      current: 3,
+      versions: { 1: v1, 2: renamed, 3: v1 },
+      steps: {},
+    };
+    expect(listed(registry, "", "guardrails.json")).toEqual({ type: "file", kind: "guardrails" });
+    const newest: FormatRegistry = { ...registry, versions: { 1: v1, 2: v1, 3: renamed } };
+    expect(listed(newest, "", "guardrails.json")).toEqual({ type: "file", kind: "rules" });
+    // A current version without the path: the newest older version that has it decides.
+    const { "guardrails.json": _gone, ...files } = v1.layout.files;
+    const without: FormatVersionSpec = { ...v1, layout: { ...v1.layout, files } };
+    const older: FormatRegistry = { ...registry, versions: { 1: v1, 2: renamed, 3: without } };
+    expect(listed(older, "", "guardrails.json")).toEqual({ type: "file", kind: "rules" });
+  });
+});
+
+describe("layoutKindOf and kindOfPath", () => {
+  const v1 = FORMAT_REGISTRY.versions[1] ?? fail("no version 1");
+  const v2 = TEST_REGISTRY.versions[2] ?? fail("no version 2");
+
+  it("give the kind of a path in one version's layout, or null", () => {
+    for (const kindOf of [layoutKindOf, kindOfPath]) {
+      expect(kindOf(v1.layout, "glossary.json")).toBe("glossary");
+      expect(kindOf(v2.layout, "glossary.json")).toBeNull();
+      expect(kindOf(v2.layout, "glossary/term-2b4d6f.json")).toBe("glossary-term");
+      expect(kindOf(v1.layout, "glossary/term-2b4d6f.json")).toBeNull();
+      expect(kindOf(v1.layout, "projects/landing/directions.json")).toBe("directions");
+      expect(kindOf(v1.layout, "projects/../directions.json")).toBeNull();
+      expect(kindOf(v1.layout, "projects/./directions.json")).toBeNull();
+      expect(kindOf(v1.layout, "references/../library.json")).toBeNull();
+      expect(kindOf(v1.layout, "references//x.json")).toBeNull();
+      expect(kindOf(v1.layout, "references/.x.json.tmp-abcdefgh")).toBeNull();
+      expect(kindOf(v1.layout, "notes.txt")).toBeNull();
+    }
+  });
+
+  it("kindOfPath alone also refuses a project folder that is not a slug", () => {
+    const path = "projects/Not A Slug/project.json";
+    expect(layoutKindOf(v1.layout, path)).toBe("project");
+    expect(kindOfPath(v1.layout, path)).toBeNull();
   });
 });
 

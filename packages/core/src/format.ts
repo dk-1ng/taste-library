@@ -8,6 +8,7 @@ import {
 } from "./json/canonical.js";
 import type { ReadOk } from "./json/read.js";
 import { FORMAT_STEPS, type LibraryValues, type MigrationStep } from "./migrations/steps.js";
+import { Slug } from "./schemas/v1/shared.js";
 import { v1Schemas } from "./schemas/v1/set.js";
 import type { Issue } from "./validation/issue.js";
 
@@ -219,4 +220,60 @@ export function classifyEntry(
   const nested = slash === -1 ? undefined : own(layout.nestedFolders, parent.slice(0, slash));
   const kind = nested === undefined ? undefined : own(nested, name);
   return kind !== undefined && !isDirectory ? { type: "file", kind } : { type: "unexpected" };
+}
+
+/**
+ * What a name found in a folder of the library is, with the folder layouts of every version the
+ * registry supports (format-spec §15.2; docs/design.md section 4, "Reading library files", "Which
+ * files are listed"): the newest version whose layout has the name as a file or a folder decides,
+ * so a path that only an older version has is listed too. A name no version's layout has is what
+ * the current layout says it is (unexpected, a leftover temporary file, or ignored).
+ */
+export function classifyListedEntry(
+  registry: FormatRegistry,
+  parent: string,
+  name: string,
+  isDirectory: boolean,
+): EntryClass {
+  const fallback = classifyEntry(currentLayout(registry), parent, name, isDirectory);
+  if (fallback.type === "file" || fallback.type === "folder") return fallback;
+  for (let version = registry.current - 1; version >= 1; version -= 1) {
+    const spec = registry.versions[version];
+    if (spec === undefined) continue;
+    const entry = classifyEntry(spec.layout, parent, name, isDirectory);
+    if (entry.type === "file" || entry.type === "folder") return entry;
+  }
+  return fallback;
+}
+
+/**
+ * The kind of the file at `path` (relative, with `/`) in one version's layout, or `null` when that
+ * layout has no file there. Only the shape of the path counts: the folder of a project may have
+ * any name the listing can find (never an empty name, `.` or `..`).
+ */
+export function layoutKindOf(layout: FormatLayout, path: string): FileKind | null {
+  const segments = path.split("/");
+  let parent = "";
+  for (const [index, name] of segments.entries()) {
+    // A listing never gives these names; in a path they could only be a trick.
+    if (name === "" || name === "." || name === "..") return null;
+    const last = index === segments.length - 1;
+    const entry = classifyEntry(layout, parent, name, !last);
+    if (last) return entry.type === "file" ? entry.kind : null;
+    if (entry.type !== "folder") return null;
+    parent = parent === "" ? name : `${parent}/${name}`;
+  }
+  return null;
+}
+
+/**
+ * The kind of the file a write may put at `path` in `layout`, or `null` when the format has no
+ * such file: as `layoutKindOf`, and a folder inside a thing folder must be named for a thing
+ * (`projects/<slug>/`), so never `..` or another path trick (docs/design.md section 14).
+ */
+export function kindOfPath(layout: FormatLayout, path: string): FileKind | null {
+  const segments = path.split("/");
+  // A folder inside a thing folder is named for a thing (`projects/<slug>/`).
+  if (segments.slice(1, -1).some((name) => !Slug.safeParse(name).success)) return null;
+  return layoutKindOf(layout, path);
 }

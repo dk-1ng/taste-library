@@ -202,6 +202,51 @@ describe("a file at a path its own version does not have (format-spec §15.2)", 
       violation("glossary.json", null),
     );
   });
+
+  it("follows the path, not the kind: a kind both versions have, at a path only one of them has", () => {
+    // A version 2 that keeps the family kind but moves its folder from families/ to collections/.
+    const v1 = TEST_REGISTRY.versions[1];
+    const v2 = TEST_REGISTRY.versions[2];
+    if (v1 === undefined || v2 === undefined) throw new Error("no versions 1 and 2");
+    const { families: _families, ...flat } = v2.layout.flatFolders;
+    const moved: FormatRegistry = {
+      ...TEST_REGISTRY,
+      versions: {
+        1: v1,
+        2: { ...v2, layout: { ...v2.layout, flatFolders: { ...flat, collections: "family" } } },
+      },
+    };
+    const family = (formatVersion: number) =>
+      bytes(
+        JSON.stringify({
+          formatVersion,
+          slug: "calm",
+          createdAt: "2026-11-02T09:00:00.000Z",
+          updatedAt: "2026-11-02T09:00:00.000Z",
+          description: {
+            origin: "user",
+            content: { name: "Calm", meaning: "Quiet layouts.", vocabulary: [] },
+            writtenAt: "2026-11-02T09:00:00.000Z",
+          },
+          members: [],
+        }),
+      );
+    // Each version's schemas have the family kind, so only the path tells which one applies.
+    expect(checkLibraryFile(moved, "family", "collections/calm.json", family(1))).toEqual(
+      violation("collections/calm.json", 1),
+    );
+    expect(checkLibraryFile(moved, "family", "families/calm.json", family(2))).toEqual(
+      violation("families/calm.json", 2),
+    );
+    expect(checkLibraryFile(moved, "family", "families/calm.json", family(1))).toMatchObject({
+      status: "valid",
+      formatVersion: 1,
+    });
+    expect(checkLibraryFile(moved, "family", "collections/calm.json", family(2))).toMatchObject({
+      status: "valid",
+      formatVersion: 2,
+    });
+  });
 });
 
 describe("a file whose whole content is null", () => {

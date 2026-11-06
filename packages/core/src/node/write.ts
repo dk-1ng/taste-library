@@ -2,15 +2,13 @@ import { lstat, stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { Plan, Skipped } from "../changes/plan.js";
 import {
-  classifyEntry,
   currentLayout,
   currentSpec,
-  type FormatLayout,
-  type FormatRegistry,
   type FileKind,
+  type FormatRegistry,
+  kindOfPath,
 } from "../format.js";
 import { differsBesidesUpdatedAt, stampFile } from "../model/timestamps.js";
-import { Slug } from "../schemas/v1/shared.js";
 import { type CrossFile, crossFileIssues, type LinkEvent } from "../validation/cross.js";
 import { checkLibraryFile, type FileCheck } from "../validation/file.js";
 import { type Issue, makeIssue } from "../validation/issue.js";
@@ -87,7 +85,8 @@ export interface WriteContext {
   wrote?: (path: string, written: Written) => void;
 }
 
-const BACKUP = ".tastelib/migration-backup";
+/** The migration backup folder, relative to the library (format-spec §15.3). */
+export const BACKUP = ".tastelib/migration-backup";
 
 function errnoOf(error: unknown): string | undefined {
   const code = (error as { code?: unknown } | null)?.code;
@@ -95,34 +94,22 @@ function errnoOf(error: unknown): string | undefined {
 }
 
 /**
- * Whether `.tastelib/migration-backup/` exists, looked at now and never cached (format-spec
- * §15.3). An error with an errno other than "not there" is thrown as it is.
+ * Whether `.tastelib/migration-backup/` exists, looked at now with `lstat` and never cached
+ * (format-spec §15.3), so a link there counts even when it leads nowhere. An error with an errno
+ * other than "not there" is thrown as it is.
  */
-async function backupPresent(root: string): Promise<boolean> {
+export async function backupPresent(
+  root: string,
+  lstatFn: (path: string) => Promise<unknown> = lstat,
+): Promise<boolean> {
   try {
-    await lstat(join(root, ".tastelib", "migration-backup"));
+    await lstatFn(join(root, ".tastelib", "migration-backup"));
     return true;
   } catch (error) {
     const errno = errnoOf(error);
     if (errno === "ENOENT" || errno === "ENOTDIR") return false;
     throw error;
   }
-}
-
-/** The type of the file at `path`, or `null` when the format has no such file. */
-export function kindOfPath(layout: FormatLayout, path: string): FileKind | null {
-  const segments = path.split("/");
-  let parent = "";
-  for (const [index, name] of segments.entries()) {
-    const last = index === segments.length - 1;
-    const entry = classifyEntry(layout, parent, name, !last);
-    if (last) return entry.type === "file" ? entry.kind : null;
-    if (entry.type !== "folder") return null;
-    // A folder inside a thing folder is named for a thing (`projects/<slug>/`): never `..` or a path trick.
-    if (index >= 1 && !Slug.safeParse(name).success) return null;
-    parent = parent === "" ? name : `${parent}/${name}`;
-  }
-  return null;
 }
 
 /** What a write that ends with a refusal or a failure reports about the disk and the plan. */

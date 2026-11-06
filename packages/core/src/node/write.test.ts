@@ -6,10 +6,9 @@ import { editJson, GOLDEN_V1, withGoldenCopy } from "../../test/support/golden.j
 import { TEST_REGISTRY } from "../../test/support/registry.js";
 import { expectMatchesRebuild } from "../../test/support/rebuild.js";
 import { FORMAT_REGISTRY } from "../browser.js";
-import { currentLayout } from "../format.js";
+import { currentLayout, kindOfPath } from "../format.js";
 import { type Library, openLibrary } from "./open.js";
 import type { LibraryWriteOptions, WriteResult } from "./write.js";
-import { kindOfPath } from "./write.js";
 
 // biome-ignore lint/suspicious/noExplicitAny: tests read and edit arbitrary JSON
 type Json = any;

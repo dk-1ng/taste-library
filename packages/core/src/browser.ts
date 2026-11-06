@@ -30,9 +30,12 @@ export {
   applySteps,
   CURRENT_FORMAT_VERSION,
   classifyEntry,
+  classifyListedEntry,
   currentLayout,
   currentSpec,
   FORMAT_REGISTRY,
+  kindOfPath,
+  layoutKindOf,
 } from "./format.js";
 export type { IdOptions, RandomSource, RefIdOptions } from "./ids/random.js";
 export {
@@ -65,6 +68,11 @@ export type { LinkState, LinkTarget, Targets } from "./library-index/targets.js"
 export { buildTargets, targetFileOf, targetKey } from "./library-index/targets.js";
 export type { VersionSummary } from "./library-index/versions.js";
 export { versionSummary } from "./library-index/versions.js";
+export {
+  type MigrationInput,
+  type MigrationPlan,
+  planMigration,
+} from "./migrations/plan.js";
 export type { LibraryValues, MigrationStep } from "./migrations/steps.js";
 export {
   CURRENT_MARKER_VERSION,

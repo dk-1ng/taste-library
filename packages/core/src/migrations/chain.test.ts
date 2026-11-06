@@ -10,8 +10,8 @@ import {
   currentLayout,
   FORMAT_REGISTRY,
   type FormatRegistry,
+  kindOfPath,
 } from "../format.js";
-import { kindOfPath } from "../node/write.js";
 import { checkLibraryFile } from "../validation/file.js";
 import { buildSnapshot, type LibraryEntry } from "../validation/library.js";
 

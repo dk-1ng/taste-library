@@ -1,4 +1,4 @@
-import type { FormatRegistry, FileKind } from "../format.js";
+import { type FileKind, type FormatRegistry, layoutKindOf } from "../format.js";
 import { escapePointerToken, readLibraryJson } from "../json/read.js";
 import { type Issue, makeIssue } from "./issue.js";
 import { escapeControl, parseValue } from "./zod-issues.js";
@@ -63,10 +63,11 @@ export function checkLibraryFile(
     registry.versions[registry.current];
   if (spec === undefined) throw new Error(`The registry has no version ${registry.current}.`);
 
-  // A path that the file's own version does not have: it belongs to another version (format-spec
-  // §15.2), so its version is wrong for where it sits and nothing else of it can be checked.
-  const schema = Object.hasOwn(spec.schemas, kind) ? spec.schemas[kind] : undefined;
-  if (schema === undefined) {
+  // A path that the file's own version's layout does not have: it belongs to another version
+  // (format-spec §15.2), so its version is wrong for where it sits and nothing else of it can be
+  // checked. The path decides, not the kind: a kind that two versions keep at different paths is
+  // checked only where its own version puts it.
+  if (layoutKindOf(spec.layout, path) !== kind) {
     return {
       status: "invalid",
       formatVersion,
@@ -83,6 +84,9 @@ export function checkLibraryFile(
       ],
     };
   }
+  const schema = Object.hasOwn(spec.schemas, kind) ? spec.schemas[kind] : undefined;
+  if (schema === undefined)
+    throw new Error(`The registry's layout names "${kind}" but has no schema for it.`);
   const parsed = parseValue(schema, read.value, path);
   const issues = parsed.issues;
 

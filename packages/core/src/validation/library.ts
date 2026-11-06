@@ -1,11 +1,10 @@
-import type { FormatRegistry, FileKind } from "../format.js";
-import { buildIndex, type LibraryIndex } from "../library-index/build.js";
-import { buildTargets } from "../library-index/targets.js";
-import { versionSummary } from "../library-index/versions.js";
-import { type CrossFile, crossFileIssues, type LinkEvent } from "./cross.js";
+import type { FileKind, FormatRegistry } from "../format.js";
+import type { LibraryIndex } from "../library-index/build.js";
+import { afterMigration, migrationOf } from "../migrations/plan.js";
 import { checkLibraryFile, type FileStatus } from "./file.js";
 import type { Issue } from "./issue.js";
 import { buildReport, mediaNotChecked, type Report, sortIssues } from "./report.js";
+import { assembleView } from "./view.js";
 
 /**
  * The snapshot of a library (docs/design.md section 3, "Core modules and API") and the pure
@@ -34,9 +33,9 @@ export interface SnapshotFile {
   fingerprint: string | null;
   formatVersion: number | null;
   status: FileStatus;
-  /** The parsed value, only when the file is `valid`. It is not migrated yet: that arrives with the migration runner (#38). */
+  /** The parsed value, only when the file is `valid`, at the file's own version (an older file is not migrated here; see `Snapshot.migrated`). */
   value: unknown;
-  /** The issues of this file alone: those within it, not the cross-file ones. */
+  /** The issues of this file alone, checked against the schemas of its own version: those within it, not the cross-file ones. */
   issues: readonly Issue[];
 }
 
@@ -45,11 +44,21 @@ export interface Snapshot {
   formatVersion: number | null;
   /** Sorted by relative path. Each file's kind, fingerprint, version and status live here. */
   files: ReadonlyMap<string, SnapshotFile>;
+  /**
+   * The library as the migration to the current version would leave it, built in memory by the
+   * planner (format-spec §15.3 steps 1 to 3), when the library is older or mixed and the migration
+   * can run: its files at their migrated paths, every fingerprint `null`, and its own `migrated`
+   * `null`. Otherwise (a current library, or a migration that cannot run) `null`.
+   */
+  migrated: Snapshot | null;
   /** Every issue of the library, sorted as in format-spec §16.3; media issues are separate (`checkMedia`). */
   issues: readonly Issue[];
   /** Folders (relative paths) that exist but could not be listed: a link into one is unresolved, not dangling. */
   unlistedFolders: readonly string[];
-  /** The index (docs/design.md section 4, "Index"), built from the parsed files. */
+  /**
+   * The index (docs/design.md section 4, "Index"), built from the parsed files: from `migrated`
+   * when there is one, with the version summary of the files on disk.
+   */
   index: LibraryIndex;
 }
 
@@ -88,11 +97,21 @@ export function checkEntry(registry: FormatRegistry, entry: LibraryEntry): Snaps
   };
 }
 
+/** The codes of the checks across files that come from the versions of the files on disk (format-spec §15.2). */
+const VERSION_CODES: ReadonlySet<string> = new Set(["needs-migration", "mixed-format-versions"]);
+
 /**
- * Everything library-wide, from the checked files: the cross-file checks, the version summary and
- * the index, recomputed in full each time (docs/design.md section 4, "Index", "How it is built").
- * `folderIssues` are those found while listing the folders (`unexpected-file`,
- * `leftover-temp-file`, an unreadable folder).
+ * Everything library-wide, from the checked files: the cross-file checks, the version summary,
+ * the migrated view and the index, recomputed in full each time (docs/design.md section 3, "Core
+ * modules and API"; section 4, "Index", "How it is built"). `folderIssues` are those found while
+ * listing the folders (`unexpected-file`, `leftover-temp-file`, an unreadable folder).
+ *
+ * In an older or mixed library whose migration can run, `migrated` is the library as the
+ * migration would leave it (`migrations/plan.ts`); the checks across files and the index come
+ * from it, and the report holds the issues of the files on disk and of the listing, the version
+ * issues, and the issues across files of `migrated` at their migrated paths. When the migration
+ * cannot run, `migrated` is `null`, the checks across files run on the files on disk (older files
+ * take no part in links), and the errors left at step 3 are reported at their migrated paths.
  */
 export function assembleSnapshot(
   registry: FormatRegistry,
@@ -103,42 +122,32 @@ export function assembleSnapshot(
   unlistedFolders: readonly string[] = [],
 ): Snapshot {
   const files = new Map<string, SnapshotFile>();
-  const issues: Issue[] = [...folderIssues];
   for (const file of [...checked].sort((a, b) => compareText(a.path, b.path))) {
     files.set(file.path, file);
-    issues.push(...file.issues);
   }
-
-  const cross = new Map<string, CrossFile>();
-  for (const [path, file] of files) {
-    cross.set(path, {
-      kind: file.kind,
-      status: file.status,
-      formatVersion: file.formatVersion,
-      value: file.value,
-    });
-  }
-  const current = registry.current;
-  const versions = versionSummary(cross, current);
-  const targets = buildTargets(cross, current, unlistedFolders);
-  const links: LinkEvent[] = [];
-  issues.push(
-    ...crossFileIssues(cross, {
-      current,
-      sha256,
-      unlistedFolders,
-      versions,
-      targets,
-      onLink: (link) => void links.push(link),
-    }),
+  const disk = assembleView(registry, files, folderIssues, sha256, unlistedFolders);
+  const versions = disk.snapshot.index.versions;
+  const { plan, cross } = migrationOf(
+    registry,
+    { files, unlistedFolders, issues: folderIssues },
+    sha256,
+    versions,
   );
-
+  if (plan.status === "current") return disk.snapshot;
+  if (plan.status === "blocked") {
+    if (plan.step === 1) return disk.snapshot;
+    return { ...disk.snapshot, issues: sortIssues([...disk.snapshot.issues, ...plan.issues]) };
+  }
+  const migrated = plan.migrated;
   return {
-    formatVersion: files.get("library.json")?.formatVersion ?? null,
-    files,
-    issues: sortIssues(issues),
-    unlistedFolders,
-    index: buildIndex({ files: cross, current, targets, links, versions }),
+    ...disk.snapshot,
+    migrated,
+    issues: sortIssues([
+      ...disk.own,
+      ...disk.cross.filter((issue) => VERSION_CODES.has(issue.code)),
+      ...cross.map((issue) => afterMigration(issue, registry.current)),
+    ]),
+    index: { ...migrated.index, versions },
   };
 }
 

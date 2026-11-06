@@ -2,13 +2,14 @@ import type { Dirent } from "node:fs";
 import type { readdir } from "node:fs/promises";
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
-import { classifyEntry, currentLayout, type FormatRegistry, type FileKind } from "../format.js";
+import { classifyListedEntry, type FileKind, type FormatRegistry } from "../format.js";
 import { type Issue, makeIssue } from "../validation/issue.js";
 
 /**
  * Listing the folders of a library (docs/design.md section 3, "Core modules and API"; section 4,
- * "Reading library files", "I/O"): which files the format knows, the issues of the listing, and
- * the folders that could not be listed.
+ * "Reading library files", "I/O" and "Which files are listed"): which files the format knows, with
+ * the folder layouts of every version the registry supports (format-spec §15.2), the issues of the
+ * listing, and the folders that could not be listed.
  */
 
 const compareText = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
@@ -57,7 +58,6 @@ export async function listLibrary(
   registry: FormatRegistry,
   list: typeof readdir,
 ): Promise<Listing> {
-  const layout = currentLayout(registry);
   const listing: Listing = { files: [], issues: [], unlisted: [] };
 
   const walk = async (relative: string, ioSegments: string[], top: boolean): Promise<void> => {
@@ -84,7 +84,10 @@ export async function listLibrary(
       const childIo = [...ioSegments, dirent.name];
       const { directory, broken } = await inspect(dirent, join(root, ...childIo));
       // A link that cannot be followed where a format folder belongs: the folder cannot be listed.
-      if (broken !== null && classifyEntry(layout, relative, name, true).type === "folder") {
+      if (
+        broken !== null &&
+        classifyListedEntry(registry, relative, name, true).type === "folder"
+      ) {
         listing.unlisted.push(childPath);
         listing.issues.push(
           makeIssue(
@@ -96,7 +99,7 @@ export async function listLibrary(
         );
         continue;
       }
-      const entry = classifyEntry(layout, relative, name, directory);
+      const entry = classifyListedEntry(registry, relative, name, directory);
       if (entry.type === "file") {
         listing.files.push({
           path: childPath,

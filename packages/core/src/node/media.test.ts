@@ -2,10 +2,11 @@ import { chmod, mkdir, readFile, rm, symlink, truncate, writeFile } from "node:f
 import { join } from "node:path";
 import { makePng, withTempDir } from "@tastelib/testkit";
 import { describe, expect, it } from "vitest";
+import { v1ToV2 } from "../../test/migrations/v1-to-v2.js";
 import { withGoldenCopy, writeGoldenMedia } from "../../test/support/golden.js";
 import { TEST_REGISTRY } from "../../test/support/registry.js";
-import { type Issue, reportOf } from "../browser.js";
-import { FORMAT_REGISTRY } from "../format.js";
+import { type Issue, type LibraryValues, type MigrationStep, reportOf } from "../browser.js";
+import { FORMAT_REGISTRY, type FormatRegistry } from "../format.js";
 import { checkMedia } from "./media.js";
 import { resolveMediaPath } from "./media-path.js";
 import { openLibrary } from "./open.js";
@@ -252,6 +253,33 @@ describe("checkMedia", () => {
       expect(
         await checkMedia(await snapshotOf(library), media, { registry: TEST_REGISTRY }),
       ).toEqual([]);
+    });
+  });
+
+  it("reads the media a reference lists from the migrated view of an older library", async () => {
+    await withMedia(async (library, media, files) => {
+      // A step that changes the size the first media item of A records: only the migrated view has it.
+      const step: MigrationStep = (input: LibraryValues) => {
+        const out = new Map(v1ToV2(input));
+        const reference = structuredClone(out.get(`references/${A}.json`)) as {
+          media: { file: string; bytes: number }[];
+        };
+        const first = reference.media[0];
+        if (first === undefined) throw new Error("no media in the reference");
+        first.bytes += 1;
+        out.set(`references/${A}.json`, reference);
+        return out;
+      };
+      const registry: FormatRegistry = { ...TEST_REGISTRY, steps: { 1: step } };
+      const opened = await openLibrary(library, { registry });
+      if (!opened.ok) throw new Error(opened.message);
+      const result = await opened.library.snapshot();
+      if (!result.ok) throw new Error(result.message);
+      expect(result.snapshot.migrated).not.toBeNull();
+      const file = files.find((path) => path.startsWith(`${A}/`));
+      expect(
+        brief(await checkMedia(result.snapshot, media, { registry }), "media-mismatch"),
+      ).toEqual([["warning", `media:${file}`]]);
     });
   });
 

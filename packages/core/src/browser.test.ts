@@ -39,6 +39,11 @@ describe("the browser entry", () => {
       "linkWeight",
       "checkEntry",
       "assembleSnapshot",
+      "planMigration",
+      "applySteps",
+      "classifyListedEntry",
+      "layoutKindOf",
+      "kindOfPath",
     ]) {
       expect(browser, name).toHaveProperty(name);
     }

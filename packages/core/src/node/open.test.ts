@@ -1,11 +1,24 @@
+import { createHash } from "node:crypto";
 import { mkdir, readdir, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { withTempDir } from "@tastelib/testkit";
 import { describe, expect, it } from "vitest";
+import { v1ToV2 } from "../../test/migrations/v1-to-v2.js";
 import { editJson, withGoldenCopy } from "../../test/support/golden.js";
+import type { Json } from "../../test/support/library.js";
 import { TEST_REGISTRY } from "../../test/support/registry.js";
-import { FORMAT_REGISTRY, type Issue, reportOf } from "../browser.js";
+import {
+  FORMAT_REGISTRY,
+  type FormatRegistry,
+  type Issue,
+  type LibraryValues,
+  type MigrationStep,
+  planMigration,
+  reportOf,
+} from "../browser.js";
 import { openLibrary } from "./open.js";
+
+const sha256 = (bytes: Uint8Array): string => createHash("sha256").update(bytes).digest("hex");
 
 const A = "ref-20261101-a1b2c3";
 const B = "ref-20261102-d4e5f6";
@@ -388,9 +401,15 @@ describe("version codes", () => {
       );
       expect(others).toContain(`references/${A}.json`);
       expect(pick(issues, "needs-migration")).toEqual([]);
-      // Files at an older version are checked against the schemas of that version, and links are not followed.
+      // Files at an older version are checked against the schemas of that version, with no error,
+      // and links are followed in the migrated view: the golden library has no dangling link, and
+      // its families give their pieces families.
       expect(issues.filter((i) => i.severity === "error")).toEqual([]);
       expect(pick(issues, "dangling-link")).toEqual([]);
+      expect(result.snapshot.migrated).not.toBeNull();
+      expect(result.snapshot.index.familiesOf.get(`${A}#p0`)).toEqual([
+        { slug: "quiet-editorial", tentative: false },
+      ]);
     });
   });
 
@@ -414,6 +433,155 @@ describe("version codes", () => {
       expect(pick(issues, "needs-migration")).toEqual([["info", null, null]]);
       expect(pick(issues, "mixed-format-versions")).toEqual([]);
       expect(issues.filter((i) => i.severity !== "info")).toEqual([]);
+    });
+  });
+});
+
+/** Opens the library and returns its snapshot; fails the test when it cannot be opened. */
+async function snapshotOf(library: string, registry: FormatRegistry = FORMAT_REGISTRY) {
+  const opened = await openLibrary(library, { registry });
+  if (!opened.ok) throw new Error(opened.message);
+  const result = await opened.library.snapshot();
+  if (!result.ok) throw new Error(result.message);
+  return result.snapshot;
+}
+
+/** The test registry with its step replaced by `change` applied to the test step's output. */
+function brokenStep(change: (out: Map<string, unknown>) => void): FormatRegistry {
+  const step: MigrationStep = (input: LibraryValues) => {
+    const out = new Map(v1ToV2(input));
+    change(out);
+    return out;
+  };
+  return { ...TEST_REGISTRY, steps: { 1: step } };
+}
+
+describe("an older library (format-spec §15.2), under the test registry", () => {
+  describe("which files are listed", () => {
+    it("lists glossary.json, a path only version 1 has, as a version 1 glossary", async () => {
+      await withGoldenCopy(async (library) => {
+        const snapshot = await snapshotOf(library, TEST_REGISTRY);
+        expect(snapshot.files.get("glossary.json")).toMatchObject({
+          kind: "glossary",
+          formatVersion: 1,
+          status: "valid",
+          issues: [],
+        });
+      });
+    });
+
+    it("reports a glossary.json that claims version 2 as schema-violation at /formatVersion, and it blocks the migration", async () => {
+      await withGoldenCopy(async (library) => {
+        await editJson(library, "glossary.json", (v) => {
+          v.formatVersion = 2;
+        });
+        const snapshot = await snapshotOf(library, TEST_REGISTRY);
+        expect(pick(snapshot.issues, "schema-violation")).toEqual([
+          ["error", "glossary.json", "/formatVersion"],
+        ]);
+        const file = snapshot.files.get("glossary.json");
+        expect(file).toMatchObject({ kind: "glossary", status: "invalid", formatVersion: 2 });
+        expect(snapshot.migrated).toBeNull();
+        expect(planMigration(TEST_REGISTRY, snapshot, sha256)).toEqual({
+          status: "blocked",
+          step: 1,
+          issues: file?.issues,
+        });
+      });
+    });
+  });
+
+  describe("the migrated view", () => {
+    it("is there for the golden v1 library, which reports needs-migration (info) and nothing else", async () => {
+      await withGoldenCopy(async (library) => {
+        const snapshot = await snapshotOf(library, TEST_REGISTRY);
+        expect(snapshot.issues.map((i) => [i.severity, i.code])).toEqual([
+          ["info", "needs-migration"],
+        ]);
+        const migrated = snapshot.migrated;
+        if (migrated === null) throw new Error("no migrated view");
+        expect(migrated.formatVersion).toBe(2);
+        expect(migrated.migrated).toBeNull();
+        expect(migrated.files.has("glossary.json")).toBe(false);
+        expect(migrated.files.get("glossary/term-2b4d6f.json")).toMatchObject({
+          kind: "glossary-term",
+          status: "valid",
+          formatVersion: 2,
+        });
+        expect([...migrated.files.values()].every((file) => file.fingerprint === null)).toBe(true);
+        // The files on disk are as read, at their own version, with their fingerprints.
+        expect(snapshot.formatVersion).toBe(1);
+        expect(snapshot.files.get("glossary.json")).toMatchObject({ formatVersion: 1 });
+        expect([...snapshot.files.values()].every((file) => file.fingerprint !== null)).toBe(true);
+      });
+    });
+
+    it("reports a link of a version 1 family to a missing piece as dangling-link, at its migrated path", async () => {
+      await withGoldenCopy(async (library) => {
+        await editJson(library, "families/quiet-editorial.json", (v) => {
+          v.members[1].target = `${A}#p9`;
+        });
+        const snapshot = await snapshotOf(library, TEST_REGISTRY);
+        const dangling = snapshot.issues.filter((i) => i.code === "dangling-link");
+        expect(dangling.map((i) => [i.severity, i.file, i.pointer])).toEqual([
+          ["warning", "families/quiet-editorial.json", "/members/1/target"],
+        ]);
+        expect(dangling[0]?.message).toMatch(/\(found after migration to version 2\)\.$/);
+        expect(snapshot.migrated).not.toBeNull();
+      });
+    });
+
+    it("reports the errors left at step 3 at their migrated paths, with no migrated view", async () => {
+      await withGoldenCopy(async (library) => {
+        const registry = brokenStep((out) => {
+          (out.get("glossary/term-2b4d6f.json") as Json).pieces = "not a list";
+        });
+        const snapshot = await snapshotOf(library, registry);
+        expect(snapshot.migrated).toBeNull();
+        const errors = snapshot.issues.filter((i) => i.severity === "error");
+        // The path exists only after the migration.
+        expect(errors.map((i) => [i.code, i.file, i.pointer])).toEqual([
+          ["schema-violation", "glossary/term-2b4d6f.json", "/pieces"],
+        ]);
+        expect(errors[0]?.message).toMatch(/\(found after migration to version 2\)\.$/);
+        expect(reportOf(registry, snapshot).counts.error).toBe(1);
+      });
+    });
+
+    it("is not there when a file is broken, and the older files then take no part in links", async () => {
+      await withGoldenCopy(async (library) => {
+        await writeFile(join(library, "guardrails.json"), "{ not json");
+        await editJson(library, "families/quiet-editorial.json", (v) => {
+          v.members[1].target = `${A}#p9`;
+        });
+        const snapshot = await snapshotOf(library, TEST_REGISTRY);
+        expect(snapshot.migrated).toBeNull();
+        expect(pick(snapshot.issues, "dangling-link")).toEqual([]);
+        expect(pick(snapshot.issues, "invalid-json")).toEqual([["error", "guardrails.json", null]]);
+        expect(snapshot.index.familiesOf.size).toBe(0);
+        expect(snapshot.index.references.size).toBe(0);
+      });
+    });
+
+    it("gives the index: references, the families of each piece and backlinks, at the version summary on disk", async () => {
+      await withGoldenCopy(async (library) => {
+        const older = await snapshotOf(library, TEST_REGISTRY);
+        const current = await snapshotOf(library);
+        expect([...older.index.references.keys()]).toEqual([A, B, C, D]);
+        expect([...older.index.references]).toEqual([...current.index.references]);
+        expect([...older.index.familiesOf]).toEqual([...current.index.familiesOf]);
+        expect(older.index.backlinks.get("family:quiet-editorial")).toEqual(
+          current.index.backlinks.get("family:quiet-editorial"),
+        );
+        expect(older.index.versions).toEqual({
+          library: 1,
+          present: [1],
+          newer: [],
+          mixedFiles: [],
+          needsMigration: true,
+        });
+        expect(older.index.targets).toBe(older.migrated?.index.targets);
+      });
     });
   });
 });
