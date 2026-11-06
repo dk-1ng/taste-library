@@ -785,6 +785,32 @@ describe("checkFile", () => {
     });
   });
 
+  it("with root, fails with realpath EINVAL without opening a target behind a link that leaves the library", async () => {
+    await withTempDir(async (dir) => {
+      const root = join(dir, "lib");
+      const outside = join(dir, "outside");
+      await mkdir(root);
+      await mkdir(outside);
+      await writeFile(join(outside, "keep.json"), "outside\n");
+      await folderLink(outside, join(root, "references"));
+      const opened: string[] = [];
+      const fs = faulty((operation, path) => {
+        if (operation === "open") opened.push(String(path));
+        return undefined;
+      });
+      const result = await checkFile(join(root, "references", "keep.json"), {
+        expected: bytes("outside\n"),
+        root,
+        fs,
+      });
+      expect(result).toMatchObject({
+        status: "failed",
+        failure: { code: "io-error", operation: "realpath", errno: "EINVAL" },
+      });
+      expect(opened).toEqual([]);
+    });
+  });
+
   it("gives write-conflict for changed bytes, a file gone, or one that appeared, naming the file", async () => {
     await withTempDir(async (dir) => {
       const target = join(dir, "a.json");

@@ -104,23 +104,29 @@ export type Containment =
 /**
  * Whether `inner` is `outer` or inside it, decided on real folders: every folder from `inner`'s
  * real path (or its nearest existing ancestor) up to the root is compared with `outer` by identity.
- * `outer` must exist.
+ * `outer` must exist. With `stopAt` (a real folder), the walk ends there: `outer` is known to be
+ * below it, so nothing above it can be `outer`.
  */
 export async function isInside(
   inner: string,
   outer: string,
   platform: NodeJS.Platform = process.platform,
+  stopAt?: string,
 ): Promise<Containment> {
   try {
     const located = await locate(inner);
     if (located.status === "failed") return located;
     const target = await identityOf(await realpath(outer));
     if (target === null) return { status: "ok", contained: false };
+    const stop = stopAt === undefined ? null : await identityOf(stopAt);
     let current = located.real;
     for (;;) {
       const here = await identityOf(current);
       if (here !== null && sameFolder(here, target, platform)) {
         return { status: "ok", contained: true };
+      }
+      if (here !== null && stop !== null && sameFolder(here, stop, platform)) {
+        return { status: "ok", contained: false };
       }
       const parent = dirname(current);
       if (parent === current) return { status: "ok", contained: false };

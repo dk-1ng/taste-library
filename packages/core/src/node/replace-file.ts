@@ -263,7 +263,8 @@ async function checkPlace(ctx: Context, folder: string): Promise<void> {
   const inWorkFolder = fold(first.normalize("NFC")) === ".tastelib";
   const realRoot = await fsPromises.realpath(root).catch(() => root);
   for (const name of inWorkFolder ? [".git"] : [".tastelib", ".git"]) {
-    const own = await isInside(folder, join(realRoot, name), ctx.platform);
+    // The walk stops at the real root: `.tastelib/` and `.git/` are below it, and `folder` is inside it.
+    const own = await isInside(folder, join(realRoot, name), ctx.platform, realRoot);
     if (own.status === "failed") {
       if (own.errno === "ENOENT" || own.errno === "ENOTDIR") continue;
       throw outsideLibrary(ctx, own.errno, `The target's place cannot be checked (${own.errno}).`);
@@ -449,6 +450,7 @@ export type CheckOutcome =
 export async function checkFile(target: string, options: WriteOptions): Promise<CheckOutcome> {
   const ctx = context(target, options);
   try {
+    await checkPlace(ctx, resolve(dirname(target)));
     await checkTarget(ctx, options.expected);
     return { status: "same" };
   } catch (error) {
