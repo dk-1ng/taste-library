@@ -2,6 +2,7 @@ import type { z } from "zod";
 import type { FileKind, LibraryFileKind } from "../format.js";
 import type { FileValue } from "../json/canonical.js";
 import { DirectionId, GuardrailId, PinId, RefId, Slug } from "../schemas/v1/shared.js";
+import { isUnderFolder } from "../library-index/targets.js";
 import type { Snapshot } from "../validation/library.js";
 import { type FileChange, type Plan, type Skipped, skipReasonOf } from "./plan.js";
 import {
@@ -41,7 +42,7 @@ function target(snapshot: Snapshot, path: string): Target {
   if (file !== undefined) {
     return file.status === "valid" ? { state: "valid", value: file.value } : { state: "unknown" };
   }
-  const unlisted = snapshot.unlistedFolders.some((folder) => path.startsWith(`${folder}/`));
+  const unlisted = snapshot.unlistedFolders.some((folder) => isUnderFolder(folder, path));
   return unlisted ? { state: "unknown" } : { state: "absent" };
 }
 
@@ -82,7 +83,7 @@ function removeLinks(
   }
   const folders = holders.flatMap((kind) => FOLDER_OF[kind] ?? []);
   for (const folder of snapshot.unlistedFolders) {
-    if (folders.some((base) => folder === base || folder.startsWith(`${base}/`))) {
+    if (folders.some((base) => folder.toLowerCase() === base || isUnderFolder(base, folder))) {
       skipped.push({ path: folder, reason: "unreadable" });
     }
   }

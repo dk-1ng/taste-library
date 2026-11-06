@@ -1,3 +1,4 @@
+import * as fsp from "node:fs/promises";
 import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { withTempDir } from "@tastelib/testkit";
@@ -841,6 +842,63 @@ describe('links that leave the library (docs/design.md section 4, "Write gate" a
       expect(await readFile(join(dir, "families-real", "dense-dashboards.json"), "utf8")).toContain(
         "Dense, again",
       );
+    });
+  });
+
+  it("refuses a change under a link that differs from its folder only in case, opening nothing outside", async () => {
+    await withGoldenCopy(async (dir, base) => {
+      const outside = join(base, "fora");
+      await mkdir(outside);
+      await rename(
+        join(dir, "projects", "internal-dashboard"),
+        join(outside, "internal-dashboard"),
+      );
+      await folderLink(
+        join(outside, "internal-dashboard"),
+        join(dir, "projects", "Internal-Dashboard"),
+      );
+      const outsideFile = join(outside, "internal-dashboard", "project.json");
+      const before = await readFile(outsideFile, "utf8");
+      const next = JSON.parse(before);
+      // A case-insensitive file system (macOS, Windows) looks the lowercase name up as the link.
+      const fold = (p: unknown): unknown =>
+        typeof p === "string"
+          ? p.replace(
+              `${join(dir, "projects")}/internal-dashboard`,
+              join(dir, "projects", "Internal-Dashboard"),
+            )
+          : p;
+      const opened: string[] = [];
+      const fs = {
+        ...fsp,
+        open: (p: string, ...a: unknown[]) => {
+          opened.push(p);
+          return (fsp.open as (...x: unknown[]) => unknown)(fold(p), ...a);
+        },
+        stat: (p: string, ...a: unknown[]) =>
+          (fsp.stat as (...x: unknown[]) => unknown)(fold(p), ...a),
+        lstat: (p: string, ...a: unknown[]) =>
+          (fsp.lstat as (...x: unknown[]) => unknown)(fold(p), ...a),
+        mkdir: (p: string, ...a: unknown[]) =>
+          (fsp.mkdir as (...x: unknown[]) => unknown)(fold(p), ...a),
+        rename: (a: string, b: string) => fsp.rename(fold(a) as string, fold(b) as string),
+        unlink: (p: string) => fsp.unlink(fold(p) as string),
+        rmdir: (p: string) => fsp.rmdir(fold(p) as string),
+      } as unknown as NonNullable<LibraryWriteOptions["fs"]>;
+      const result = await (await open(dir)).write(
+        () => ({
+          changes: [{ path: "projects/internal-dashboard/project.json", next }],
+          skipped: [],
+        }),
+        { clock, fs },
+      );
+      expect(result).toMatchObject({ status: "refused", written: [] });
+      if (result.status !== "refused") throw new Error("not refused");
+      expect(result.issues.map((i) => [i.code, i.file])).toEqual([
+        ["unreadable-file", "projects/Internal-Dashboard"],
+      ]);
+      expect(opened.filter((p) => p.toLowerCase().includes("internal-dashboard"))).toEqual([]);
+      expect(await readFile(outsideFile, "utf8")).toBe(before);
     });
   });
 });

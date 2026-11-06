@@ -9,6 +9,7 @@ import {
   type FormatRegistry,
   kindOfPath,
 } from "../format.js";
+import { isUnderFolder } from "../library-index/targets.js";
 import { differsBesidesUpdatedAt, stampFile } from "../model/timestamps.js";
 import { type CrossFile, crossFileIssues, type LinkEvent } from "../validation/cross.js";
 import { checkLibraryFile, type FileCheck } from "../validation/file.js";
@@ -408,7 +409,7 @@ async function vanished(root: string): Promise<Pick<OpenFailure, "code" | "messa
 
 /** The folder that could not be listed and holds `path`, or `undefined`. */
 function unlistedFolderOf(snapshot: Snapshot, path: string): string | undefined {
-  return snapshot.unlistedFolders.find((folder) => path.startsWith(`${folder}/`));
+  return snapshot.unlistedFolders.find((folder) => isUnderFolder(folder, path));
 }
 
 /**
