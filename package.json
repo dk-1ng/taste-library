@@ -17,7 +17,7 @@
     "test": "pnpm test:scripts && pnpm -r --if-present test",
     "test:scripts": "node --test scripts/",
     "docs:size": "node scripts/design-size.mjs",
-    "check": "pnpm lint && pnpm format:check && pnpm typecheck && pnpm test && pnpm build",
+    "check": "pnpm lint && pnpm format:check && pnpm docs:size && pnpm typecheck && pnpm test && pnpm build",
     "prepare": "node scripts/setup-hooks.mjs",
     "test:e2e": "pnpm --filter @tastelib/testkit build && pnpm --filter @tastelib/e2e e2e",
     "test:e2e:install": "pnpm --filter @tastelib/e2e e2e:install"
