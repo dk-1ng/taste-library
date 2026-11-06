@@ -250,7 +250,7 @@ export function createRefresher(options: RefreshOptions): Refresher {
       value: written.check.value,
       issues: written.check.issues,
     };
-    // Read back once at the next refresh, which compares the bytes (design layer 9).
+    // Read back once at the next refresh, which compares the bytes (layer 9 of `write.ts`).
     cache.set(path, { file, fingerprint: null, unsettled: true, brokenLink: null });
   };
 

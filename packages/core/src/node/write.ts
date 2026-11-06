@@ -316,11 +316,12 @@ interface Prepared {
 }
 
 /**
- * The links that the plan adds and that do not resolve (design layer 4), judged on one view of the
- * library with the whole plan applied, deletions included. A link is new unless the same holder of
- * the same file already linked to the same target; one that was already dangling is kept. A link
- * into a file that exists but is not `valid` cannot be checked and is refused too. Links that a
- * deletion leaves dangling in files the plan does not change are not new, so they never refuse it.
+ * The links that the plan adds and that do not resolve (docs/design.md section 4, "Validation"),
+ * judged on one view of the library with the whole plan applied, deletions included. A link is new
+ * unless the same holder of the same file already linked to the same target; one that was already
+ * dangling is kept. A link into a file that exists but is not `valid` cannot be checked and is
+ * refused too. Links that a deletion leaves dangling in files the plan does not change are not
+ * new, so they never refuse it.
  */
 function newBrokenLinks(context: WriteContext, snapshot: Snapshot, changes: Prepared[]): Issue[] {
   const paths = new Set(changes.filter((c) => c.value !== null).map((c) => c.path));
@@ -622,7 +623,7 @@ async function writePlan(
       throw new Error(`"${file.path}" to delete was never read.`);
     else outcome = await removeFile(target, { ...optionsFor(file), expected: file.expected });
     const applied = outcome.status === "done" || (outcome.status === "failed" && outcome.applied);
-    // 9. The snapshot learns what reached the disk (design layer 9).
+    // 9. The snapshot learns what reached the disk.
     if (applied) {
       context.wrote?.(
         file.path,

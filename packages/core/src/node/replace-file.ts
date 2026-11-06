@@ -69,7 +69,8 @@ export interface WriteOptions {
   /**
    * Called next to every re-read of the target (before the rename and before each Windows retry);
    * returns `true` to end the write with `write-conflict`, for example because a migration backup
-   * appeared (design section 4, layer 8). The migration runner itself omits it.
+   * appeared (docs/design.md section 4, "Write gate", step 2). The migration runner itself omits
+   * it.
    */
   conflictCheck?: () => Promise<boolean>;
   /** Name used in results, normally the path relative to the library. Default: the target path. */
