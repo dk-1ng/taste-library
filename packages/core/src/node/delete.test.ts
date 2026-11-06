@@ -12,6 +12,7 @@ import {
   tree,
 } from "../../test/support/library.js";
 import { authoredValues, linkEverywhere, linksOnDisk } from "../../test/support/links.js";
+import { expectMatchesRebuild } from "../../test/support/rebuild.js";
 import {
   planDirectionDeletion,
   planFamilyDeletion,
@@ -319,6 +320,7 @@ describe("files with errors", () => {
       );
       const issues = await issuesOnDisk(dir);
       expect(issues.map((i) => [i.code, i.file])).toEqual([["dangling-link", "glossary.json"]]);
+      await expectMatchesRebuild(library, dir);
     });
   });
 
@@ -409,6 +411,7 @@ describe("sequential numbers", () => {
       expect(reference.pins.map((pin: Json) => pin.id)).toEqual(["p1", "p3"]);
       expect(reference.lastIssued.pin).toBe(3);
       expect(await issuesOnDisk(dir)).toEqual([]);
+      await expectMatchesRebuild(library, dir);
     });
   });
 

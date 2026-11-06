@@ -1,3 +1,4 @@
+import { createSeededRandom } from "@tastelib/testkit";
 import { describe, expect, it } from "vitest";
 import type { z } from "zod";
 import { issuesFromZod } from "../../validation/zod-issues.js";
@@ -7,10 +8,11 @@ import {
   DirectionId,
   GuardrailId,
   HttpUrl,
+  isTimestamp,
   LanguageTag,
   LibraryId,
-  line,
   LocalPieceId,
+  line,
   MediaId,
   Name,
   Note,
@@ -24,8 +26,8 @@ import {
   Tag,
   TagList,
   TermId,
-  text,
   Timestamp,
+  text,
 } from "./shared.js";
 
 function problems(schema: z.ZodType, value: unknown) {
@@ -60,6 +62,71 @@ describe("Timestamp", () => {
     ]) {
       expect(problems(Timestamp, value), String(value)).not.toEqual([]);
     }
+  });
+});
+
+describe("isTimestamp", () => {
+  /** The rule as format-spec §4.1 states it: the string round-trips through `Date`. */
+  function roundTrips(value: string): boolean {
+    if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)) return false;
+    const time = new Date(value).getTime();
+    return !Number.isNaN(time) && new Date(time).toISOString() === value;
+  }
+
+  const pad = (value: number, width: number): string => String(value).padStart(width, "0");
+
+  it("gives the same answer as a Date round trip at the edges", () => {
+    const edges = [
+      "2000-02-29T00:00:00.000Z",
+      "2100-02-29T00:00:00.000Z",
+      "2024-02-29T23:59:59.999Z",
+      "2023-02-29T00:00:00.000Z",
+      "2024-02-30T00:00:00.000Z",
+      "2024-04-31T00:00:00.000Z",
+      "2024-12-31T00:00:00.000Z",
+      "2024-12-32T00:00:00.000Z",
+      "2024-00-10T00:00:00.000Z",
+      "2024-13-10T00:00:00.000Z",
+      "2024-01-00T00:00:00.000Z",
+      "2024-01-01T24:00:00.000Z",
+      "2024-01-01T23:60:00.000Z",
+      "2024-01-01T23:59:60.000Z",
+      "0000-01-01T00:00:00.000Z",
+      "0000-02-29T00:00:00.000Z",
+      "9999-12-31T23:59:59.999Z",
+      "2026-11-04T12:00:00Z",
+      "2026-11-04T12:00:00.000+00:00",
+      "+2026-11-04T12:00:00.000Z",
+      "２０２６-11-04T12:00:00.000Z",
+    ];
+    for (const value of edges) expect(isTimestamp(value), value).toBe(roundTrips(value));
+    expect(isTimestamp("0000-01-01T00:00:00.000Z")).toBe(true);
+    expect(isTimestamp("9999-12-31T23:59:59.999Z")).toBe(true);
+    expect(isTimestamp("2000-02-29T00:00:00.000Z")).toBe(true);
+    expect(isTimestamp("2100-02-29T00:00:00.000Z")).toBe(false);
+    expect(isTimestamp("2024-01-01T24:00:00.000Z")).toBe(false);
+  });
+
+  it("gives the same answer as a Date round trip on 200 000 seeded timestamp-shaped strings", () => {
+    const random = createSeededRandom(41);
+    let valid = 0;
+    let invalid = 0;
+    for (let i = 0; i < 200_000; i++) {
+      // Every field ranges past its limit, and days and months cluster at month ends and February.
+      const month = random.next() < 0.3 ? 2 : random.int(20);
+      const day = random.next() < 0.5 ? 27 + random.int(6) : random.int(40);
+      const value = `${pad(random.int(10_000), 4)}-${pad(month, 2)}-${pad(day, 2)}T${pad(
+        random.int(30),
+        2,
+      )}:${pad(random.int(70), 2)}:${pad(random.int(70), 2)}.${pad(random.int(1000), 3)}Z`;
+      const expected = roundTrips(value);
+      if (isTimestamp(value) !== expected) expect(isTimestamp(value), value).toBe(expected);
+      if (expected) valid++;
+      else invalid++;
+    }
+    // Both answers are well represented, so the comparison means something.
+    expect(valid).toBeGreaterThan(20_000);
+    expect(invalid).toBeGreaterThan(20_000);
   });
 });
 

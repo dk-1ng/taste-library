@@ -400,8 +400,9 @@ function verdict(text: string | Uint8Array, type: "reference" = "reference") {
   const bytes = typeof text === "string" ? enc(text) : text;
   const read = readLibraryJson(bytes, "references/r.json");
   if (!read.ok) throw new Error("the file must read");
-  expect(ReferenceSchema.safeParse(read.value).success).toBe(true);
-  return { read, issue: canonicalIssue(type, "references/r.json", bytes, read) };
+  const parsed = ReferenceSchema.safeParse(read.value);
+  expect(parsed.success).toBe(true);
+  return { read, issue: canonicalIssue(type, "references/r.json", read, parsed.data) };
 }
 
 describe("not-canonical: every cause of format-spec §3.3", () => {

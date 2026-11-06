@@ -1,5 +1,13 @@
 import type { LibraryFileKind } from "../format.js";
 import type { FileValue } from "../json/canonical.js";
+import {
+  buildTargets,
+  type LinkState,
+  type LinkTarget,
+  type Targets,
+  targetFileOf,
+} from "../library-index/targets.js";
+import { type VersionSummary, versionSummary } from "../library-index/versions.js";
 import { comparisonKey } from "../schemas/v1/shared.js";
 import type { FileStatus } from "./file.js";
 import { type Issue, makeIssue } from "./issue.js";
@@ -30,6 +38,10 @@ export interface CrossOptions {
   sha256: (bytes: Uint8Array) => string;
   /** Folders that exist but could not be listed: what lies under one is unknown, so a link into it is unresolved. */
   unlistedFolders?: readonly string[];
+  /** The version summary of these files (`versionSummary`); built here when absent. */
+  versions?: VersionSummary;
+  /** The targets of these files (`buildTargets`); built here when absent. */
+  targets?: Targets;
   /** Called once for every link of every usable file, resolved or not (the write pipeline uses it to find new links). */
   onLink?: (link: LinkEvent) => void;
 }
@@ -38,110 +50,65 @@ export interface CrossOptions {
  * One link of a file. `holder` is what holds the link: the id of the entry (a term, guardrail,
  * statement or direction) or, for a link outside entries, the field (`members`, `result`), so a
  * link is "the same" when its holder and target are (docs/design.md section 4, "Writing library
- * files", layer 4). `target` names what it points to.
+ * files", layer 4). `target` names what it points to, for messages; `to` is the target itself.
  */
 export interface LinkEvent {
   file: string;
   pointer: string;
   holder: string;
   target: string;
+  to: LinkTarget;
   /** The file that should hold the target, relative to the library. */
   targetFile: string;
   /** `unresolved`: the target file exists but is not `valid`, so whether it holds the target is unknown. */
-  state: "resolved" | "dangling" | "unresolved";
+  state: LinkState;
 }
 
 type Path = (string | number)[];
-
-/** A file usable as the target or holder of a link: valid and at the current version. */
-interface Usable<K extends LibraryFileKind> {
-  value: FileValue<K>;
-}
 
 export function crossFileIssues(
   files: ReadonlyMap<string, CrossFile>,
   options: CrossOptions,
 ): Issue[] {
   const issues: Issue[] = [];
-  const library = files.get("library.json");
-  const libraryVersion =
-    library !== undefined && (library.status === "valid" || library.status === "newer")
-      ? library.formatVersion
-      : null;
 
-  // ---- Versions (format-spec §15.2) ----
-  if (library?.status === "valid" && libraryVersion !== null && libraryVersion < options.current) {
+  // ---- Versions (format-spec §15.2), from the version summary of the index ----
+  const versions = options.versions ?? versionSummary(files, options.current);
+  if (versions.needsMigration) {
     issues.push(
       makeIssue(
         "needs-migration",
         null,
         null,
-        `The library is at format version ${libraryVersion} and this tool writes version ${options.current}; it is migrated in memory for reading and on disk before the first write.`,
+        `The library is at format version ${versions.library} and this tool writes version ${options.current}; it is migrated in memory for reading and on disk before the first write.`,
       ),
     );
   }
-  if (libraryVersion !== null) {
-    for (const [path, file] of files) {
-      if (path === "library.json") continue;
-      if (file.status !== "valid" && file.status !== "invalid") continue;
-      if (file.formatVersion !== null && file.formatVersion !== libraryVersion) {
-        issues.push(
-          makeIssue(
-            "mixed-format-versions",
-            path,
-            "/formatVersion",
-            `formatVersion: ${file.formatVersion} differs from ${libraryVersion}, the version in library.json; a write migrates the library first.`,
-          ),
-        );
-      }
-    }
+  for (const path of versions.mixedFiles) {
+    const file = files.get(path);
+    issues.push(
+      makeIssue(
+        "mixed-format-versions",
+        path,
+        "/formatVersion",
+        `formatVersion: ${file?.formatVersion} differs from ${versions.library}, the version in library.json; a write migrates the library first.`,
+      ),
+    );
   }
 
-  // ---- Links (format-spec §14) ----
-  const usable = <K extends LibraryFileKind>(
-    path: string,
-    kind: K,
-  ): Usable<K> | "absent" | "unresolved" => {
-    const file = files.get(path);
-    const unlisted = options.unlistedFolders ?? [];
-    if (unlisted.some((folder) => path.startsWith(`${folder}/`))) return "unresolved";
-    if (file === undefined || file.kind !== kind) return "absent";
-    if (file.status !== "valid" || file.formatVersion !== options.current) return "unresolved";
-    return { value: file.value as FileValue<K> };
-  };
+  // ---- Links (format-spec §14), resolved by the one rule of `library-index/targets.ts` ----
+  const targets =
+    options.targets ?? buildTargets(files, options.current, options.unlistedFolders ?? []);
 
-  /** The state of a link to a whole file (a project, a family): `found` counts as resolved. */
-  const stateOf = (target: object | string): LinkEvent["state"] =>
-    target === "absent" ? "dangling" : target === "unresolved" ? "unresolved" : "resolved";
-
-  const pieceIds = new Map<string, Set<string> | "absent" | "unresolved">();
-  const piecesOf = (refId: string): Set<string> | "absent" | "unresolved" => {
-    let cached = pieceIds.get(refId);
-    if (cached === undefined) {
-      const target = usable(`references/${refId}.json`, "reference");
-      cached =
-        typeof target === "string"
-          ? target
-          : new Set(["p0", ...target.value.pins.map((pin) => pin.id)]);
-      pieceIds.set(refId, cached);
-    }
-    return cached;
-  };
-
-  const link = (
-    file: string,
-    path: Path,
-    holder: string,
-    what: string,
-    targetFile: string,
-    state: LinkEvent["state"],
-  ): void => {
+  const link = (file: string, path: Path, holder: string, what: string, to: LinkTarget): void => {
+    const state = targets.resolve(to);
     options.onLink?.({
       file,
       pointer: pointerOf(path) ?? "",
       holder,
       target: what,
-      targetFile,
+      to,
+      targetFile: targetFileOf(to),
       state,
     });
     if (state !== "dangling") return;
@@ -157,13 +124,7 @@ export function crossFileIssues(
 
   const checkPiece = (file: string, path: Path, holder: string, ref: string): void => {
     const [refId = "", pieceId = ""] = ref.split("#");
-    const pieces = piecesOf(refId);
-    const what = `piece ${ref}`;
-    const target = `references/${refId}.json`;
-    if (pieces === "unresolved") link(file, path, holder, what, target, "unresolved");
-    else if (pieces === "absent" || !pieces.has(pieceId)) {
-      link(file, path, holder, what, target, "dangling");
-    } else link(file, path, holder, what, target, "resolved");
+    link(file, path, holder, `piece ${ref}`, { kind: "piece", ref: refId, piece: pieceId });
   };
 
   for (const [path, file] of files) {
@@ -173,30 +134,17 @@ export function crossFileIssues(
         const reference = file.value as FileValue<"reference">;
         const result = reference.result;
         if (result !== null) {
-          const project = usable(`projects/${result.project}/project.json`, "project");
-          link(
-            path,
-            ["result", "project"],
-            "result",
-            `project "${result.project}"`,
-            `projects/${result.project}/project.json`,
-            stateOf(project),
-          );
+          link(path, ["result", "project"], "result", `project "${result.project}"`, {
+            kind: "project",
+            slug: result.project,
+          });
           if (result.direction !== null) {
-            const directions = usable(`projects/${result.project}/directions.json`, "directions");
-            const found =
-              typeof directions === "string"
-                ? directions
-                : directions.value.directions.some((entry) => entry.id === result.direction)
-                  ? "found"
-                  : "absent";
             link(
               path,
               ["result", "direction"],
               "result",
               `direction ${result.direction} of project "${result.project}"`,
-              `projects/${result.project}/directions.json`,
-              stateOf(found),
+              { kind: "direction", project: result.project, id: result.direction },
             );
           }
         }
@@ -240,38 +188,22 @@ export function crossFileIssues(
       }
       case "directions": {
         const directions = file.value as FileValue<"directions">;
-        const guardrails = usable("guardrails.json", "guardrails");
         directions.directions.forEach((direction, directionIndex) => {
           const at: Path = ["directions", directionIndex];
           if (direction.family !== null) {
-            const family = usable(`families/${direction.family}.json`, "family");
-            link(
-              path,
-              [...at, "family"],
-              direction.id,
-              `family "${direction.family}"`,
-              `families/${direction.family}.json`,
-              stateOf(family),
-            );
+            link(path, [...at, "family"], direction.id, `family "${direction.family}"`, {
+              kind: "family",
+              slug: direction.family,
+            });
           }
           direction.pieces.forEach((ref, index) => {
             checkPiece(path, [...at, "pieces", index], direction.id, ref);
           });
           direction.guardrails.forEach((id, index) => {
-            const state: LinkEvent["state"] =
-              guardrails === "unresolved"
-                ? "unresolved"
-                : guardrails === "absent" || !guardrails.value.guardrails.some((g) => g.id === id)
-                  ? "dangling"
-                  : "resolved";
-            link(
-              path,
-              [...at, "guardrails", index],
-              direction.id,
-              `guardrail ${id}`,
-              "guardrails.json",
-              state,
-            );
+            link(path, [...at, "guardrails", index], direction.id, `guardrail ${id}`, {
+              kind: "guardrail",
+              id,
+            });
           });
         });
         break;

@@ -16,6 +16,11 @@ export interface ReadOk {
   hadBom: boolean;
   /** The text contained a CR character (CRLF line endings). */
   hadCr: boolean;
+  /**
+   * The decoded text, a leading BOM included. Fatal UTF-8 decoding is one-to-one, so two files
+   * have the same bytes exactly when they have the same decoded text (the canonical check).
+   */
+  decoded: string;
 }
 
 export interface ReadFailed {
@@ -202,13 +207,19 @@ export function readLibraryJson(bytes: Uint8Array, file: string): ReadResult {
     if (parent.list !== null) {
       parent.list.push(value);
     } else if (parent.record !== null) {
-      // defineProperty keeps "__proto__" an own property, as JSON.parse does.
-      Object.defineProperty(parent.record, parent.key, {
-        value,
-        writable: true,
-        enumerable: true,
-        configurable: true,
-      });
+      if (parent.key === "__proto__") {
+        // An assignment would set the prototype; defineProperty keeps it an own property, as
+        // JSON.parse does. Every other member of Object.prototype is a writable data property,
+        // so assigning to it creates an own property, and is much faster.
+        Object.defineProperty(parent.record, parent.key, {
+          value,
+          writable: true,
+          enumerable: true,
+          configurable: true,
+        });
+      } else {
+        parent.record[parent.key] = value;
+      }
     }
     return false;
   };
@@ -319,5 +330,5 @@ export function readLibraryJson(bytes: Uint8Array, file: string): ReadResult {
   }
 
   if (issues.length > 0) return { ok: false, issues };
-  return { ok: true, value: root, hadBom, hadCr };
+  return { ok: true, value: root, hadBom, hadCr, decoded };
 }

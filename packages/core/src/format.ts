@@ -34,13 +34,11 @@ export interface FormatLayout {
 export interface FormatVersionSpec {
   schemas: SchemaSet;
   layout: FormatLayout;
-  /** The `not-canonical` warning of a file of this version, or `null` when the bytes are canonical. */
-  canonical?: (
-    kind: LibraryFileKind,
-    file: string,
-    bytes: Uint8Array,
-    read: ReadOk,
-  ) => Issue | null;
+  /**
+   * The `not-canonical` warning of a file of this version, or `null` when the bytes are canonical.
+   * `parsed` is the output of the file's schema for `read.value`.
+   */
+  canonical?: (kind: LibraryFileKind, file: string, read: ReadOk, parsed: unknown) => Issue | null;
 }
 
 export interface FormatRegistry {
@@ -81,7 +79,7 @@ export const FORMAT_REGISTRY: FormatRegistry = {
     1: {
       schemas: v1Schemas,
       layout: V1_LAYOUT,
-      canonical: (kind, file, bytes, read) => canonicalIssue(kind, file, bytes, read),
+      canonical: (kind, file, read, parsed) => canonicalIssue(kind, file, read, parsed),
     },
   },
 };

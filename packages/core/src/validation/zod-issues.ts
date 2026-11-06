@@ -154,8 +154,24 @@ export function issuesFromZod(error: z.ZodError, file: string): Issue[] {
   return out;
 }
 
+/** What `parseValue` gives: the issues, and zod's output when there are none. */
+export type ParsedValue =
+  | { success: true; data: unknown; issues: Issue[] }
+  | { success: false; issues: Issue[] };
+
+/**
+ * Parses a value with a schema: its issues, and zod's output when it passed, so a caller that
+ * needs the output (the canonical check) does not run the schema again. Always reports the
+ * input, so messages are right.
+ */
+export function parseValue(schema: z.ZodType, value: unknown, file: string): ParsedValue {
+  const result = schema.safeParse(value, { reportInput: true });
+  return result.success
+    ? { success: true, data: result.data, issues: [] }
+    : { success: false, issues: issuesFromZod(result.error, file) };
+}
+
 /** Parses a value with a schema and returns its issues (empty when it is valid). Always reports the input, so messages are right. */
 export function validateValue(schema: z.ZodType, value: unknown, file: string): Issue[] {
-  const result = schema.safeParse(value, { reportInput: true });
-  return result.success ? [] : issuesFromZod(result.error, file);
+  return parseValue(schema, value, file).issues;
 }

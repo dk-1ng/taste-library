@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { crashAt, recordPoints, SimulatedCrash } from "../../test/support/crash.js";
 import { editJson, withGoldenCopy } from "../../test/support/golden.js";
+import { expectMatchesRebuild } from "../../test/support/rebuild.js";
 import {
   issuesOnDisk,
   type Json,
@@ -105,6 +106,7 @@ describe("a write of several files", () => {
       ]);
       expect(await which(dir)).toEqual([true, true, true]);
       expect(await issuesOnDisk(dir)).toEqual([]);
+      await expectMatchesRebuild(library, dir);
     });
   });
 
@@ -121,6 +123,7 @@ describe("a write of several files", () => {
       expect(points).toEqual(["checked", "before-unlink", `deleted:${path}`]);
       expect(Object.keys(await tree(dir))).not.toContain(path);
       expect(await issuesOnDisk(dir)).toEqual([]);
+      await expectMatchesRebuild(library, dir);
     });
   });
 
@@ -331,6 +334,7 @@ describe("refusals before anything is written", () => {
         status: "written",
         written: [`references/${NEW}.json`, GLOSSARY],
       });
+      await expectMatchesRebuild(library, dir);
     });
   });
 
@@ -412,6 +416,7 @@ describe("a write that stops partway", () => {
       expect(result.issues.map((i) => [i.file, i.code])).toEqual([[FAMILY, "write-conflict"]]);
       expect(await which(dir)).toEqual([true, false, false]);
       expect(temporaryFiles(await tree(dir))).toEqual([]);
+      await expectMatchesRebuild(library, dir);
     });
   });
 
@@ -483,6 +488,7 @@ describe("a write that stops partway", () => {
         notWritten: [PROFILE],
       });
       expect(await which(dir)).toEqual([true, true, false]);
+      await expectMatchesRebuild(library, dir);
     });
   });
 

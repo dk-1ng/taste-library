@@ -133,9 +133,14 @@ export function canonicalize<K extends FileType>(type: K, value: unknown): FileV
   return file.order(parsed) as FileValue<K>;
 }
 
+/** Two-space JSON plus one LF, no BOM (format-spec §3.1, §3.3), of a canonical value. */
+function textOf(canonical: unknown): string {
+  return `${JSON.stringify(canonical, null, 2)}\n`;
+}
+
 /** The canonical text of a file: two-space JSON plus one LF, no BOM (format-spec §3.1, §3.3). */
 export function serialize<K extends FileType>(type: K, value: unknown): string {
-  return `${JSON.stringify(canonicalize(type, value), null, 2)}\n`;
+  return textOf(canonicalize(type, value));
 }
 
 /**
@@ -152,14 +157,21 @@ export function isCanonical(type: FileType, value: unknown, bytes: Uint8Array): 
  * The `not-canonical` warning for a file that read and validated but whose bytes are not the
  * canonical form of its value, or `null` when they are (format-spec §3.3, §16.2). The message
  * names a BOM or CRLF when the reader saw one.
+ *
+ * `parsed` is the output of the file's schema for `read.value` (zod's output follows the
+ * schema's key order), so the schema does not run a second time. The canonical text is compared
+ * with the decoded text, BOM included, which gives the verdict of `isCanonical` on the bytes:
+ * the reader's fatal UTF-8 decoding is one-to-one, and a valid value holds no lone surrogate, so
+ * the canonical text encodes to exactly one byte sequence (docs/design.md section 4, "Index",
+ * "Measured on the implementation").
  */
 export function canonicalIssue(
   type: FileType,
   file: string,
-  bytes: Uint8Array,
   read: ReadOk,
+  parsed: unknown,
 ): Issue | null {
-  if (isCanonical(type, read.value, bytes)) return null;
+  if (textOf(FILES[type].order(parsed)) === read.decoded) return null;
   const causes: string[] = [];
   if (read.hadBom) causes.push("a byte order mark");
   if (read.hadCr) causes.push("CRLF line endings");
