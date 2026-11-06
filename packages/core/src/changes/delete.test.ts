@@ -226,9 +226,15 @@ describe("unlisted folders that differ only in case", () => {
   });
 
   it("are listed as skipped when they may hold the files that link to the deleted thing", () => {
-    const snapshot: Snapshot = { ...goldenSnapshot(), unlistedFolders: ["References/Archive"] };
+    const snapshot: Snapshot = {
+      ...goldenSnapshot(),
+      unlistedFolders: ["References", "References/Archive"],
+    };
     const plan = planDirectionDeletion(snapshot, "landing-redesign", "d1");
-    expect(plan.skipped).toEqual([{ path: "References/Archive", reason: "unreadable" }]);
+    expect(plan.skipped).toEqual([
+      { path: "References", reason: "unreadable" },
+      { path: "References/Archive", reason: "unreadable" },
+    ]);
   });
 });
 
