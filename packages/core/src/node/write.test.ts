@@ -1,8 +1,10 @@
+import * as fsp from "node:fs/promises";
 import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { withTempDir } from "@tastelib/testkit";
 import { describe, expect, it } from "vitest";
 import { editJson, GOLDEN_V1, withGoldenCopy } from "../../test/support/golden.js";
+import { copyFolder, folderLink } from "../../test/support/links-out.js";
 import { TEST_REGISTRY } from "../../test/support/registry.js";
 import { expectMatchesRebuild } from "../../test/support/rebuild.js";
 import { FORMAT_REGISTRY } from "../browser.js";
@@ -728,6 +730,175 @@ describe("paths", () => {
       await expect(
         library.write(() => ({ changes: [{ path: "../outside.json", next: {} }], skipped: [] })),
       ).rejects.toThrow();
+    });
+  });
+});
+
+describe('links that leave the library (docs/design.md section 4, "Write gate" and "Writing library files")', () => {
+  const NEW = "references/ref-20261105-zzzzzz.json";
+
+  /** A plan that creates a new reference, copied from the first one of the golden library. */
+  const createReference = async () => {
+    const next = JSON.parse(await readFile(join(GOLDEN_V1, "references", `${A}.json`), "utf8"));
+    next.id = "ref-20261105-zzzzzz";
+    next.media = [];
+    return { changes: [{ path: NEW, next }], skipped: [] };
+  };
+
+  it("refuses every write with unreadable-file at .tastelib when it is a link, wherever it leads", async () => {
+    for (const where of ["outside", "inside"]) {
+      await withGoldenCopy(async (dir, base) => {
+        const target = where === "outside" ? join(base, "fora") : join(dir, "tastelib-real");
+        await mkdir(join(target, "migration-backup"), { recursive: true });
+        await folderLink(target, join(dir, ".tastelib"));
+        const before = await readFile(join(dir, "glossary.json"), "utf8");
+        const library = await open(dir);
+        const result = await edit(library, "glossary.json", (g) => {
+          g.terms[0].entry.content.definition = "Changed.";
+        });
+        expect(result, where).toMatchObject({
+          status: "refused",
+          written: [],
+          notWritten: [],
+        });
+        if (result.status !== "refused") throw new Error("not refused");
+        expect(
+          result.issues.map((i) => [i.code, i.file]),
+          where,
+        ).toEqual([["unreadable-file", ".tastelib"]]);
+        expect(JSON.stringify(result)).not.toContain(base);
+        expect(await readFile(join(dir, "glossary.json"), "utf8")).toBe(before);
+        expect(await tree(target)).toEqual({ "migration-backup/": "" });
+        expect(await library.migrate()).toMatchObject({ status: "refused" });
+      });
+    }
+  });
+
+  it("refuses a new reference while references/ leads outside, and writes nothing", async () => {
+    await withGoldenCopy(async (dir, base) => {
+      const outside = join(base, "fora");
+      await copyFolder(join(dir, "references"), outside);
+      await rm(join(dir, "references"), { recursive: true });
+      await folderLink(outside, join(dir, "references"));
+      const before = await tree(outside);
+      const result = await (await open(dir)).write(createReference, { clock });
+      expect(result).toMatchObject({
+        status: "refused",
+        written: [],
+        notWritten: [],
+      });
+      if (result.status !== "refused") throw new Error("not refused");
+      expect(result.issues.map((i) => [i.code, i.file])).toEqual([
+        ["unreadable-file", "references"],
+      ]);
+      expect(await tree(outside)).toEqual(before);
+    });
+  });
+
+  it("refuses a new reference while references/ cannot be listed", async () => {
+    await withGoldenCopy(async (dir) => {
+      const opened = await openLibrary(dir, {
+        readdir: (async (path: string, options: never) => {
+          if (path === join(dir, "references")) {
+            throw Object.assign(new Error("injected"), { code: "EACCES" });
+          }
+          return readdir(path, options);
+        }) as typeof readdir,
+      });
+      if (!opened.ok) throw new Error(opened.message);
+      const result = await opened.library.write(createReference, { clock });
+      expect(result).toMatchObject({ status: "refused", written: [] });
+      if (result.status !== "refused") throw new Error("not refused");
+      expect(result.issues.map((i) => [i.code, i.file])).toEqual([
+        ["unreadable-file", "references"],
+      ]);
+      expect((await readdir(join(dir, "references"))).includes("ref-20261105-zzzzzz.json")).toBe(
+        false,
+      );
+    });
+  });
+
+  it("refuses a write into references/ when it leads into .tastelib/ or .git/, and writes nothing there", async () => {
+    for (const own of [".tastelib", ".git"]) {
+      await withGoldenCopy(async (dir) => {
+        await mkdir(join(dir, own, "r"), { recursive: true });
+        await rm(join(dir, "references"), { recursive: true });
+        await folderLink(join(dir, own, "r"), join(dir, "references"));
+        const result = await (await open(dir)).write(createReference, { clock });
+        expect(result, own).toMatchObject({ status: "refused", written: [] });
+        expect(await readdir(join(dir, own, "r")), own).toEqual([]);
+      });
+    }
+  });
+
+  it("writes through a link that stays inside a library with no .tastelib/ and no .git/", async () => {
+    await withGoldenCopy(async (dir) => {
+      await rename(join(dir, "families"), join(dir, "families-real"));
+      await folderLink(join(dir, "families-real"), join(dir, "families"));
+      const result = await edit(await open(dir), "families/dense-dashboards.json", (f) => {
+        f.description.content.name = "Dense, again";
+      });
+      expect(result, JSON.stringify(result)).toMatchObject({ status: "written" });
+      expect(await readFile(join(dir, "families-real", "dense-dashboards.json"), "utf8")).toContain(
+        "Dense, again",
+      );
+    });
+  });
+
+  it("refuses a change under a link that differs from its folder only in case, opening nothing outside", async () => {
+    await withGoldenCopy(async (dir, base) => {
+      const outside = join(base, "fora");
+      await mkdir(outside);
+      await rename(
+        join(dir, "projects", "internal-dashboard"),
+        join(outside, "internal-dashboard"),
+      );
+      await folderLink(
+        join(outside, "internal-dashboard"),
+        join(dir, "projects", "Internal-Dashboard"),
+      );
+      const outsideFile = join(outside, "internal-dashboard", "project.json");
+      const before = await readFile(outsideFile, "utf8");
+      const next = JSON.parse(before);
+      // A case-insensitive file system (macOS, Windows) looks the lowercase name up as the link.
+      const fold = (p: unknown): unknown =>
+        typeof p === "string"
+          ? p.replace(
+              `${join(dir, "projects")}/internal-dashboard`,
+              join(dir, "projects", "Internal-Dashboard"),
+            )
+          : p;
+      const opened: string[] = [];
+      const fs = {
+        ...fsp,
+        open: (p: string, ...a: unknown[]) => {
+          opened.push(p);
+          return (fsp.open as (...x: unknown[]) => unknown)(fold(p), ...a);
+        },
+        stat: (p: string, ...a: unknown[]) =>
+          (fsp.stat as (...x: unknown[]) => unknown)(fold(p), ...a),
+        lstat: (p: string, ...a: unknown[]) =>
+          (fsp.lstat as (...x: unknown[]) => unknown)(fold(p), ...a),
+        mkdir: (p: string, ...a: unknown[]) =>
+          (fsp.mkdir as (...x: unknown[]) => unknown)(fold(p), ...a),
+        rename: (a: string, b: string) => fsp.rename(fold(a) as string, fold(b) as string),
+        unlink: (p: string) => fsp.unlink(fold(p) as string),
+        rmdir: (p: string) => fsp.rmdir(fold(p) as string),
+      } as unknown as NonNullable<LibraryWriteOptions["fs"]>;
+      const result = await (await open(dir)).write(
+        () => ({
+          changes: [{ path: "projects/internal-dashboard/project.json", next }],
+          skipped: [],
+        }),
+        { clock, fs },
+      );
+      expect(result).toMatchObject({ status: "refused", written: [] });
+      if (result.status !== "refused") throw new Error("not refused");
+      expect(result.issues.map((i) => [i.code, i.file])).toEqual([
+        ["unreadable-file", "projects/Internal-Dashboard"],
+      ]);
+      expect(opened.filter((p) => p.toLowerCase().includes("internal-dashboard"))).toEqual([]);
+      expect(await readFile(outsideFile, "utf8")).toBe(before);
     });
   });
 });

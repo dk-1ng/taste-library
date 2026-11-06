@@ -1,4 +1,4 @@
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { crashAtCall, recordPoints, SimulatedCrash } from "../../test/support/crash.js";
@@ -11,6 +11,7 @@ import {
   temporaryFiles,
   tree,
 } from "../../test/support/library.js";
+import { folderLink } from "../../test/support/links-out.js";
 import { authoredValues, linkEverywhere, linksOnDisk } from "../../test/support/links.js";
 import { expectMatchesRebuild } from "../../test/support/rebuild.js";
 import {
@@ -477,6 +478,27 @@ describe("Windows", () => {
       expect(result).toMatchObject({ status: "written", written: [`references/${D}.json`] });
       expect(attempts).toBe(2);
       expect(await issuesOnDisk(dir)).toEqual([]);
+    });
+  });
+});
+
+describe("a folder that leads outside the library", () => {
+  it("deletes the reference, skips the links in families/, and leaves the families outside unchanged", async () => {
+    await withGoldenCopy(async (dir, base) => {
+      await linkEverywhere(await open(dir), `${A}#p0`);
+      const outside = join(base, "fora");
+      await cp(join(dir, "families"), outside, { recursive: true });
+      await rm(join(dir, "families"), { recursive: true });
+      await folderLink(outside, join(dir, "families"));
+      const before = await tree(outside);
+      const result = await (await open(dir)).write((s) => planReferenceDeletion(s, A), { clock });
+      expect(result).toMatchObject({ status: "written" });
+      if (result.status !== "written") throw new Error("not written");
+      expect(result.written).toContain(REF_A);
+      expect(result.skipped).toContainEqual({ path: "families", reason: "unreadable" });
+      expect(result.written.some((path) => path.startsWith("families/"))).toBe(false);
+      await expect(readFile(join(dir, REF_A))).rejects.toMatchObject({ code: "ENOENT" });
+      expect(await tree(outside)).toEqual(before);
     });
   });
 });

@@ -2,6 +2,7 @@ import { constants } from "node:fs";
 import * as fsPromises from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { randomPart, type RandomSource } from "../ids/random.js";
+import { isInside } from "./folders.js";
 
 /**
  * Atomic replacement of one library file with the optimistic write-conflict check
@@ -226,6 +227,54 @@ async function withRetries(
   }
 }
 
+/** Ends the operation as `failed` with the `realpath` failure of a target that leaves its place. */
+function outsideLibrary(ctx: Context, errno: string, message: string): Stop {
+  return new Stop({
+    status: "failed",
+    failure: { code: "io-error", operation: "realpath", file: ctx.file, errno, message },
+    applied: false,
+    createdFolders: [],
+  });
+}
+
+/**
+ * With `root`, before anything is created, renamed or removed: the nearest existing folder above
+ * the target must be inside the library's real folder, and not inside its real `.tastelib/` or
+ * `.git/` (a target in `.tastelib/` may be inside the first). Messages never say where a link
+ * leads (docs/design.md section 4, "Writing library files").
+ */
+async function checkPlace(ctx: Context, folder: string): Promise<void> {
+  const root = ctx.root;
+  if (root === undefined) return;
+  const inside = await isInside(folder, root, ctx.platform);
+  if (inside.status === "failed") {
+    throw outsideLibrary(
+      ctx,
+      inside.errno,
+      `The target's place cannot be checked (${inside.errno}).`,
+    );
+  }
+  if (!inside.contained) {
+    throw outsideLibrary(ctx, "EINVAL", "The target is outside the library folder.");
+  }
+  const fold = (text: string): string =>
+    ctx.platform === "win32" || ctx.platform === "darwin" ? text.toLowerCase() : text;
+  const first = relative(root, resolve(ctx.target)).split(sep)[0] ?? "";
+  const inWorkFolder = fold(first.normalize("NFC")) === ".tastelib";
+  const realRoot = await fsPromises.realpath(root).catch(() => root);
+  for (const name of inWorkFolder ? [".git"] : [".tastelib", ".git"]) {
+    // The walk stops at the real root: `.tastelib/` and `.git/` are below it, and `folder` is inside it.
+    const own = await isInside(folder, join(realRoot, name), ctx.platform, realRoot);
+    if (own.status === "failed") {
+      if (own.errno === "ENOENT" || own.errno === "ENOTDIR") continue;
+      throw outsideLibrary(ctx, own.errno, `The target's place cannot be checked (${own.errno}).`);
+    }
+    if (own.contained) {
+      throw outsideLibrary(ctx, "EINVAL", "The target is in the library's working or Git folder.");
+    }
+  }
+}
+
 /** Creates the missing folders above `folder`, one level at a time, and returns the ones it made. */
 async function createMissingFolders(ctx: Context, folder: string): Promise<string[]> {
   const missing: string[] = [];
@@ -256,6 +305,7 @@ async function createMissingFolders(ctx: Context, folder: string): Promise<strin
       throw failure(ctx, "stat", error, errno);
     }
   }
+  await checkPlace(ctx, folder);
   for (;;) {
     try {
       await ctx.fs.stat(current);
@@ -400,6 +450,7 @@ export type CheckOutcome =
 export async function checkFile(target: string, options: WriteOptions): Promise<CheckOutcome> {
   const ctx = context(target, options);
   try {
+    await checkPlace(ctx, resolve(dirname(target)));
     await checkTarget(ctx, options.expected);
     return { status: "same" };
   } catch (error) {
@@ -418,6 +469,7 @@ export async function removeFile(
 ): Promise<WriteOutcome> {
   const ctx = context(target, options);
   try {
+    await checkPlace(ctx, resolve(dirname(target)));
     await ctx.at("before-unlink");
     await checkTarget(ctx, options.expected);
     await withRetries(ctx, "unlink", options.expected, () => ctx.fs.unlink(target));

@@ -4,6 +4,7 @@ import { join, sep } from "node:path";
 import { withTempDir } from "@tastelib/testkit";
 import { describe, expect, it } from "vitest";
 import { SimulatedCrash } from "../../test/support/crash.js";
+import { folderLink } from "../../test/support/links-out.js";
 import {
   checkFile,
   type FileSystem,
@@ -656,6 +657,121 @@ describe("a symbolic link at the target path (docs/design.md section 14)", () =>
   });
 });
 
+describe("a target reached through a link that leaves its place (docs/design.md section 4)", () => {
+  const FAILED = {
+    status: "failed",
+    failure: { operation: "realpath", errno: "EINVAL" },
+  };
+
+  /** A library folder with a `references` that is a junction to an `outside` folder holding one file. */
+  async function linkedReferences(dir: string) {
+    const root = join(dir, "lib");
+    const outside = join(dir, "outside");
+    await mkdir(root);
+    await mkdir(outside);
+    await writeFile(join(outside, "keep.json"), "outside\n");
+    await folderLink(outside, join(root, "references"));
+    return { root, outside };
+  }
+
+  it("replaceFile fails with realpath EINVAL, touching nothing in either folder", async () => {
+    await withTempDir(async (dir) => {
+      const { root, outside } = await linkedReferences(dir);
+      const result = await replaceFile(join(root, "references", "ref-x.json"), bytes("x"), {
+        expected: "absent",
+        root,
+        file: "references/ref-x.json",
+      });
+      expect(result).toMatchObject({ ...FAILED, createdFolders: [] });
+      expect(JSON.stringify(result)).not.toContain(dir);
+      expect(await readdir(outside)).toEqual(["keep.json"]);
+      expect(await readFile(join(outside, "keep.json"), "utf8")).toBe("outside\n");
+      expect(await readdir(root)).toEqual(["references"]);
+    });
+  });
+
+  it("replaceFile creates no folder outside when a folder to create leads outside", async () => {
+    await withTempDir(async (dir) => {
+      const root = join(dir, "lib");
+      const outside = join(dir, "outside");
+      await mkdir(root);
+      await mkdir(outside);
+      await folderLink(outside, join(root, "projects"));
+      const result = await replaceFile(
+        join(root, "projects", "new-slug", "project.json"),
+        bytes("x"),
+        { expected: "absent", root },
+      );
+      expect(result).toMatchObject({ ...FAILED, createdFolders: [] });
+      expect(await readdir(outside)).toEqual([]);
+    });
+  });
+
+  it("removeFile fails and leaves the file outside when the target's folder leads outside", async () => {
+    await withTempDir(async (dir) => {
+      const { root, outside } = await linkedReferences(dir);
+      const result = await removeFile(join(root, "references", "keep.json"), {
+        expected: bytes("outside\n"),
+        root,
+      });
+      expect(result).toMatchObject(FAILED);
+      expect(await readFile(join(outside, "keep.json"), "utf8")).toBe("outside\n");
+    });
+  });
+
+  it("refuses a folder that leads into the real .tastelib/ or .git/, and nothing is written there", async () => {
+    for (const own of [".tastelib", ".git"]) {
+      await withTempDir(async (dir) => {
+        const root = join(dir, "lib");
+        await mkdir(join(root, own, "r"), { recursive: true });
+        await folderLink(join(root, own, "r"), join(root, "references"));
+        const replaced = await replaceFile(join(root, "references", "ref-x.json"), bytes("x"), {
+          expected: "absent",
+          root,
+        });
+        expect(replaced, own).toMatchObject(FAILED);
+        await writeFile(join(root, own, "r", "keep.json"), "k");
+        const removed = await removeFile(join(root, "references", "keep.json"), {
+          expected: bytes("k"),
+          root,
+        });
+        expect(removed, own).toMatchObject(FAILED);
+        expect(await readdir(join(root, own, "r"))).toEqual(["keep.json"]);
+      });
+    }
+  });
+
+  it("still writes a target that is itself in .tastelib/", async () => {
+    await withTempDir(async (dir) => {
+      const root = join(dir, "lib");
+      await mkdir(root);
+      const target = join(root, ".tastelib", "migration-backup", "owner.json");
+      const result = await replaceFile(target, bytes("o"), {
+        expected: "absent",
+        root,
+      });
+      expect(result.status).toBe("done");
+      expect(await readFile(target, "utf8")).toBe("o");
+      const removed = await removeFile(target, { expected: bytes("o"), root });
+      expect(removed.status).toBe("done");
+    });
+  });
+
+  it("writes through an inside junction in a library with neither .tastelib/ nor .git/", async () => {
+    await withTempDir(async (dir) => {
+      const root = join(dir, "lib");
+      await mkdir(join(root, "real"), { recursive: true });
+      await folderLink(join(root, "real"), join(root, "references"));
+      const result = await replaceFile(join(root, "references", "ref-x.json"), bytes("x"), {
+        expected: "absent",
+        root,
+      });
+      expect(result).toEqual({ status: "done", createdFolders: [] });
+      expect(await readFile(join(root, "real", "ref-x.json"), "utf8")).toBe("x");
+    });
+  });
+});
+
 describe("checkFile", () => {
   it("finds the bytes expected, and a file absent as expected", async () => {
     await withTempDir(async (dir) => {
@@ -666,6 +782,32 @@ describe("checkFile", () => {
         status: "same",
       });
       expect(await readdir(dir)).toEqual(["a.json"]);
+    });
+  });
+
+  it("with root, fails with realpath EINVAL without opening a target behind a link that leaves the library", async () => {
+    await withTempDir(async (dir) => {
+      const root = join(dir, "lib");
+      const outside = join(dir, "outside");
+      await mkdir(root);
+      await mkdir(outside);
+      await writeFile(join(outside, "keep.json"), "outside\n");
+      await folderLink(outside, join(root, "references"));
+      const opened: string[] = [];
+      const fs = faulty((operation, path) => {
+        if (operation === "open") opened.push(String(path));
+        return undefined;
+      });
+      const result = await checkFile(join(root, "references", "keep.json"), {
+        expected: bytes("outside\n"),
+        root,
+        fs,
+      });
+      expect(result).toMatchObject({
+        status: "failed",
+        failure: { code: "io-error", operation: "realpath", errno: "EINVAL" },
+      });
+      expect(opened).toEqual([]);
     });
   });
 

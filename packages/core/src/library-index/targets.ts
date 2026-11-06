@@ -85,13 +85,27 @@ const FAMILY = /^families\/([^/]+)\.json$/;
 const PROJECT = /^projects\/([^/]+)\/project\.json$/;
 const DIRECTIONS = /^projects\/([^/]+)\/directions\.json$/;
 
+/**
+ * Whether `path` lies under `folder`, both relative library paths. Case is ignored on every
+ * platform: format paths are lowercase identifiers, and on a case-insensitive file system a folder
+ * that could not be listed also holds the paths that differ from it only in case. On a
+ * case-sensitive file system, a stray sibling that differs only in case therefore also blocks the
+ * real folder; that sibling has its own issue, which names it.
+ */
+export function isUnderFolder(folder: string, path: string): boolean {
+  return path
+    .normalize("NFC")
+    .toLowerCase()
+    .startsWith(`${folder.normalize("NFC").toLowerCase()}/`);
+}
+
 export function buildTargets(
   files: ReadonlyMap<string, CrossFile>,
   current: number,
   unlistedFolders: readonly string[],
 ): Targets {
   const underUnlisted = (path: string): boolean =>
-    unlistedFolders.some((folder) => path.startsWith(`${folder}/`));
+    unlistedFolders.some((folder) => isUnderFolder(folder, path));
   const references = new Map<string, ReadonlySet<string>>();
   const families = new Set<string>();
   const projects = new Set<string>();

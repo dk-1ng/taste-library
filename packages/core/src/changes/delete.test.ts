@@ -214,6 +214,30 @@ describe("deleting a direction", () => {
   });
 });
 
+describe("unlisted folders that differ only in case", () => {
+  it("block the deletion of a file that may lie in them, whose existence is unknown", () => {
+    const snapshot: Snapshot = { ...goldenSnapshot(), unlistedFolders: ["References"] };
+    const absent = "ref-20991231-zzzzzz";
+    const plan = planReferenceDeletion(snapshot, absent);
+    expect(plan.blockedBy).toEqual([`references/${absent}.json`]);
+    expect(planPinDeletion(snapshot, absent, "p1").blockedBy).toEqual([
+      `references/${absent}.json`,
+    ]);
+  });
+
+  it("are listed as skipped when they may hold the files that link to the deleted thing", () => {
+    const snapshot: Snapshot = {
+      ...goldenSnapshot(),
+      unlistedFolders: ["References", "References/Archive"],
+    };
+    const plan = planDirectionDeletion(snapshot, "landing-redesign", "d1");
+    expect(plan.skipped).toEqual([
+      { path: "References", reason: "unreadable" },
+      { path: "References/Archive", reason: "unreadable" },
+    ]);
+  });
+});
+
 describe("every planner", () => {
   it("leaves the snapshot's values untouched", () => {
     const snapshot = goldenSnapshot();

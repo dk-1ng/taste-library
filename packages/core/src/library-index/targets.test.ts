@@ -167,6 +167,17 @@ describe("buildTargets", () => {
     expect(targets.resolve(family("quiet-editorial"))).toBe("resolved");
   });
 
+  it("says unresolved, not dangling, for a target under an unlisted folder that differs only in case", () => {
+    const snapshot = {
+      ...goldenSnapshot(),
+      unlistedFolders: ["projects/Internal-Dashboard"],
+    };
+    const targets = targetsOf(snapshot);
+    expect(targets.resolve(direction("internal-dashboard", "d1"))).toBe("unresolved");
+    expect(targets.resolve(project("internal-dashboard"))).toBe("unresolved");
+    expect(targets.resolve(project("other-project"))).toBe("dangling");
+  });
+
   it("keeps a family whose description is rejected: existence is about the file", () => {
     const targets = targetsOf(
       goldenSnapshot((files) => {
