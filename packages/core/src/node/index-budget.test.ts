@@ -31,8 +31,9 @@ const REFRESH_BUDGET_MS = 500;
 const WRITE_BUDGET_MS = 1000;
 
 /*
- * The relative bound of each line: `factor × baseline + overhead`. They were set from the
- * `[budget]` lines of CI runs on Linux, Windows and macOS (#83), and are the same on every system.
+ * The relative bound of each line: `factor × baseline + overhead`, the same on every system. The
+ * refresh constants were set from the `[budget]` lines of CI runs on Linux, Windows and macOS
+ * (#83); the opening and write constants are still the starting values of #36.
  */
 /** Opening, over a plain read and `JSON.parse` of every file with 16 reads in flight. */
 const OPEN_FACTOR = 15;
