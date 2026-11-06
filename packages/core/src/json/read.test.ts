@@ -38,6 +38,41 @@ describe("readLibraryJson: valid input", () => {
     expect(({} as Record<string, unknown>).x).toBeUndefined();
   });
 
+  it("keeps __proto__ an own property whatever its value, as JSON.parse does", () => {
+    for (const json of ["null", "1", '"x"', "[]", "{}"]) {
+      const text = `{"a":1,"__proto__":${json},"b":2}`;
+      const result = read(text);
+      const value = result.ok ? (result.value as object) : {};
+      expect(Object.keys(value), json).toEqual(["a", "__proto__", "b"]);
+      expect(Object.getPrototypeOf(value), json).toBe(Object.prototype);
+      expect(value, json).toEqual(JSON.parse(text));
+    }
+  });
+
+  it("makes keys named like Object.prototype members own properties", () => {
+    const keys = [
+      "constructor",
+      "toString",
+      "valueOf",
+      "hasOwnProperty",
+      "isPrototypeOf",
+      "propertyIsEnumerable",
+      "toLocaleString",
+      "__defineGetter__",
+      "__lookupGetter__",
+    ];
+    const text = `{${keys.map((key, i) => `"${key}":${i}`).join(",")}}`;
+    const result = read(text);
+    const value = result.ok ? (result.value as Record<string, unknown>) : {};
+    expect(Object.keys(value)).toEqual(keys);
+    keys.forEach((key, i) => {
+      expect(Object.hasOwn(value, key), key).toBe(true);
+      expect(value[key], key).toBe(i);
+    });
+    expect(Object.getPrototypeOf(value)).toBe(Object.prototype);
+    expect(Object.prototype.toString).toBeTypeOf("function");
+  });
+
   it("converts numbers like JSON.parse", () => {
     const text = "[0.1,1e400,-0,12345678901234567890]";
     const result = read(text);
@@ -142,6 +177,17 @@ describe("readLibraryJson: duplicate-key", () => {
 
   it("escapes ~ and / in the pointer", () => {
     expect(codes('{"a/b~":1,"a/b~":2}')).toEqual([{ code: "duplicate-key", pointer: "/a~1b~0" }]);
+  });
+
+  it("reports a repeated __proto__ or constructor like any other key", () => {
+    expect(
+      codes(
+        '{"__proto__":{},"__proto__":null,"constructor":1,"x":{"constructor":2,"constructor":3}}',
+      ),
+    ).toEqual([
+      { code: "duplicate-key", pointer: "/__proto__" },
+      { code: "duplicate-key", pointer: "/x/constructor" },
+    ]);
   });
 
   it("does not confuse the same key in different objects", () => {
