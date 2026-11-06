@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { join, sep } from "node:path";
 import { withTempDir } from "@tastelib/testkit";
 import { describe, expect, it } from "vitest";
@@ -596,6 +596,61 @@ describe("removeFile", () => {
       });
       expect(result.status).toBe("write-conflict");
       expect(await readFile(target, "utf8")).toBe("theirs");
+    });
+  });
+});
+
+/** Makes a file symbolic link; `false` where Windows needs extra rights for one. */
+async function fileLink(target: string, path: string): Promise<boolean> {
+  try {
+    await symlink(target, path, "file");
+    return true;
+  } catch (error) {
+    // A file symlink on Windows needs administrator rights or Developer Mode.
+    if (process.platform === "win32" && (error as NodeJS.ErrnoException).code === "EPERM") {
+      return false;
+    }
+    throw error;
+  }
+}
+
+describe("a symbolic link at the target path (docs/design.md section 14)", () => {
+  it("replaceFile replaces the link itself and leaves the file it led to unchanged", async () => {
+    await withTempDir(async (dir) => {
+      const root = join(dir, "lib");
+      const outside = join(dir, "outside");
+      await mkdir(root);
+      await mkdir(outside);
+      await writeFile(join(outside, "victim.json"), "outside\n");
+      const target = join(root, "glossary.json");
+      if (!(await fileLink(join(outside, "victim.json"), target))) return;
+      const result = await replaceFile(target, bytes("mine\n"), {
+        expected: bytes("outside\n"),
+        root,
+      });
+      expect(result).toEqual({ status: "done", createdFolders: [] });
+      expect(await readFile(join(outside, "victim.json"), "utf8")).toBe("outside\n");
+      expect(await readdir(outside)).toEqual(["victim.json"]);
+      expect((await lstat(target)).isSymbolicLink()).toBe(false);
+      expect(await readFile(target, "utf8")).toBe("mine\n");
+      expect(await readdir(root)).toEqual(["glossary.json"]);
+    });
+  });
+
+  it("removeFile removes the link itself and leaves the file it led to unchanged", async () => {
+    await withTempDir(async (dir) => {
+      const root = join(dir, "lib");
+      const outside = join(dir, "outside");
+      await mkdir(root);
+      await mkdir(outside);
+      await writeFile(join(outside, "victim.json"), "outside\n");
+      const target = join(root, "glossary.json");
+      if (!(await fileLink(join(outside, "victim.json"), target))) return;
+      const result = await removeFile(target, { expected: bytes("outside\n"), root });
+      expect(result).toEqual({ status: "done", createdFolders: [] });
+      expect(await readFile(join(outside, "victim.json"), "utf8")).toBe("outside\n");
+      expect(await readdir(outside)).toEqual(["victim.json"]);
+      expect(await readdir(root)).toEqual([]);
     });
   });
 });
