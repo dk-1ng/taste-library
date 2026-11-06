@@ -40,7 +40,20 @@ export {
   resolveConfigPath,
   writeConfig,
 } from "./node/config.js";
+export { findGitWorkTree, type GitWalk, isInside } from "./node/folders.js";
 export { checkMedia, type MediaCheckOptions } from "./node/media.js";
+export {
+  type AttachLibrary,
+  type AttachOptions,
+  type AttachRefusalCode,
+  type AttachResult,
+  attachMediaFolder,
+  guardMediaWrite,
+  isIgnorableEntry,
+  MARKER_FILE,
+  type MediaGuardResult,
+  readMarker,
+} from "./node/media-folder.js";
 export { mediaPathSegments, type ResolvedMedia, resolveMediaPath } from "./node/media-path.js";
 export type {
   Library as OpenLibrary,
@@ -51,8 +64,8 @@ export type {
 } from "./node/open.js";
 export { openLibrary } from "./node/open.js";
 export type { FileBytes } from "./node/read-file.js";
-export type { StatFn } from "./node/refresh.js";
 export { MAX_JSON_BYTES, readLibraryFileBytes } from "./node/read-file.js";
+export type { StatFn } from "./node/refresh.js";
 export {
   type CheckOutcome,
   checkFile,

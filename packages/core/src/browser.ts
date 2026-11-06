@@ -7,7 +7,7 @@ export {
   planPinDeletion,
   planReferenceDeletion,
 } from "./changes/delete.js";
-export type { FileChange, Plan, SkipReason, Skipped } from "./changes/plan.js";
+export type { FileChange, Plan, Skipped, SkipReason } from "./changes/plan.js";
 export { skipReasonOf } from "./changes/plan.js";
 export type { PieceMatcher } from "./changes/remove-links.js";
 export {
@@ -57,6 +57,15 @@ export type { LinkState, LinkTarget, Targets } from "./library-index/targets.js"
 export { buildTargets, targetFileOf, targetKey } from "./library-index/targets.js";
 export type { VersionSummary } from "./library-index/versions.js";
 export { versionSummary } from "./library-index/versions.js";
+export {
+  CURRENT_MARKER_VERSION,
+  MARKER_REGISTRY,
+  type MarkerMigration,
+  type MarkerRegistry,
+  type MarkerVersionSpec,
+  migrateMarker,
+  serializeMarker,
+} from "./marker.js";
 export type { DerivedState, ReferenceForState } from "./model/derived-state.js";
 export { derivedState } from "./model/derived-state.js";
 export type {

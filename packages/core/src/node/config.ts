@@ -1,9 +1,10 @@
 import { randomBytes } from "node:crypto";
 import { constants } from "node:fs";
-import { lstat, mkdir, open, realpath, rename, rm } from "node:fs/promises";
+import { mkdir, open, rename, rm } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join, parse, win32 } from "node:path";
+import { dirname, join, win32 } from "node:path";
 import { z } from "zod";
+import { findGitWorkTree } from "./folders.js";
 
 /** Per-machine configuration (docs/design.md section 4). Never part of a library. */
 
@@ -149,40 +150,16 @@ export async function assertMediaOutsideGit(
   if (!isCleanAbsolutePath(mediaPath)) {
     throw new ConfigError(file, PATH_MESSAGE, "mediaPath");
   }
-  let current = mediaPath;
-  // Resolve symbolic links on the nearest ancestor that exists.
-  for (;;) {
-    try {
-      current = await realpath(current);
-      break;
-    } catch (error) {
-      if (!isNodeError(error) || error.code !== "ENOENT") {
-        throw new ConfigError(file, `cannot be checked (${errorCode(error)})`, "mediaPath");
-      }
-      const parent = dirname(current);
-      if (parent === current) break;
-      current = parent;
-    }
+  const walk = await findGitWorkTree(mediaPath);
+  if (walk.status === "failed") {
+    throw new ConfigError(file, `cannot be checked (${walk.errno})`, "mediaPath");
   }
-  const root = parse(current).root;
-  for (;;) {
-    try {
-      await lstat(join(current, ".git"));
-      throw new ConfigError(
-        file,
-        `is inside a Git working tree (${join(current, ".git")}); media must live outside any repository`,
-        "mediaPath",
-      );
-    } catch (error) {
-      if (error instanceof ConfigError) throw error;
-      if (!isNodeError(error) || error.code !== "ENOENT") {
-        throw new ConfigError(file, `cannot be checked (${errorCode(error)})`, "mediaPath");
-      }
-    }
-    if (current === root) return;
-    const parent = dirname(current);
-    if (parent === current) return;
-    current = parent;
+  if (walk.status === "found") {
+    throw new ConfigError(
+      file,
+      `is inside a Git working tree (${join(walk.worktree, ".git")}); media must live outside any repository`,
+      "mediaPath",
+    );
   }
 }
 
