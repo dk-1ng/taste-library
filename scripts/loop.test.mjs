@@ -117,6 +117,26 @@ test("argument errors exit with 2 before any network call", () => {
   }
 });
 
+test("plan argument errors exit with 2 without running gh", () => {
+  // With no PATH, any call to `gh` fails, and a failed call exits with 1, not 2.
+  const originalError = console.error;
+  const originalPath = process.env.PATH;
+  console.error = () => {};
+  process.env.PATH = "";
+  try {
+    for (const argv of [
+      ["plan", "5", "1"],
+      ["plan", "5", "M1", "checkpoint"],
+      ["plan", "5", "M1", "nonsense"],
+    ]) {
+      assert.equal(main(argv), 2, argv.join(" "));
+    }
+  } finally {
+    console.error = originalError;
+    process.env.PATH = originalPath;
+  }
+});
+
 test("--help exits with 0", () => {
   const originalLog = console.log;
   console.log = () => {};
@@ -211,4 +231,25 @@ test("unblock refuses a checkpoint and an issue that is not blocked", () => {
   const checkpoint = issue(3, "M0 Foundation", "type: checkpoint", "status: blocked");
   assert.match(unblockChanges(checkpoint).error, /checkpoint/);
   assert.match(unblockChanges(issue(4, "M0 Foundation", "status: ready")).error, /not blocked/);
+});
+
+test("plan without a type leaves the type labels alone", () => {
+  const triaged = withState(issue(5, null, "status: triage", "type: bug"));
+  const changes = planChanges(triaged, milestones, "M1");
+  assert.deepEqual(changes.add, ["status: ready"]);
+  assert.deepEqual(changes.remove, ["status: triage"]);
+});
+
+test("plan keeps a blocked issue blocked: it does not add ready", () => {
+  const blocked = withState(
+    issue(6, null, "status: triage", "status: blocked", "type: checkpoint"),
+  );
+  const changes = planChanges(blocked, milestones, "M1");
+  assert.deepEqual(changes.add, []);
+  assert.deepEqual(changes.remove, ["status: triage"]);
+});
+
+test("unblock refuses a closed issue", () => {
+  const closed = withState(issue(4, "M0 Foundation", "status: blocked"), "CLOSED");
+  assert.match(unblockChanges(closed).error, /closed/);
 });

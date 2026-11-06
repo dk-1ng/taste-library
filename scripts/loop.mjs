@@ -124,7 +124,8 @@ export function planChanges(issue, milestones, milestoneArg, typeArg) {
   if (parsed.type && names.has(CHECKPOINT)) {
     return { error: `Issue #${issue.number} is a checkpoint: its type is the maintainer's.` };
   }
-  const add = [READY];
+  // A blocked issue (a checkpoint, for example) stays blocked: only `unblock` makes it ready.
+  const add = names.has(BLOCKED) ? [] : [READY];
   const remove = [TRIAGE];
   if (parsed.type) {
     add.push(parsed.type);
@@ -138,6 +139,9 @@ export function planChanges(issue, milestones, milestoneArg, typeArg) {
 /** What `unblock` changes on an issue (pure). Returns { add, remove } or { error }. */
 export function unblockChanges(issue) {
   const names = labelsOf(issue);
+  if (issue.state !== undefined && issue.state !== "OPEN") {
+    return { error: `Issue #${issue.number} is closed.` };
+  }
   if (names.has(CHECKPOINT)) {
     return {
       error: `Issue #${issue.number} is a checkpoint: it stays blocked until the maintainer closes it.`,
