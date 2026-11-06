@@ -4,6 +4,7 @@ import { mkdir, readdir, readFile, rename, rm, stat, utimes, writeFile } from "n
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { editJson, withGoldenCopy } from "../../test/support/golden.js";
+import { copyFolder, folderLink } from "../../test/support/links-out.js";
 import { type Json, open, tree } from "../../test/support/library.js";
 import { expectMatchesRebuild } from "../../test/support/rebuild.js";
 import { makeIssue } from "../validation/issue.js";
@@ -599,6 +600,33 @@ describe(".tastelib/", () => {
       expect(await snap(library)).toBe(written);
       await rm(join(dir, ".tastelib"), { recursive: true });
       expect(await snap(library)).toBe(written);
+    });
+  });
+});
+
+describe("a refresh after a folder starts leading outside the library", () => {
+  it("drops its files and reports the folder, and brings them back when it is restored", async () => {
+    await withGoldenCopy(async (dir, base) => {
+      const library = await open(dir);
+      const first = await snap(library);
+      expect(first.files.has("families/dense-dashboards.json")).toBe(true);
+      const outside = join(base, "fora");
+      await copyFolder(join(dir, "families"), outside);
+      await rm(join(dir, "families"), { recursive: true });
+      await folderLink(outside, join(dir, "families"));
+      const away = await snap(library);
+      expect([...away.files.keys()].filter((path) => path.startsWith("families/"))).toEqual([]);
+      expect(away.unlistedFolders).toEqual(["families"]);
+      expect(away.issues.filter((i) => i.code === "unreadable-file").map((i) => i.file)).toEqual([
+        "families",
+      ]);
+      expect(JSON.stringify(away.issues)).not.toContain(base);
+      await rm(join(dir, "families"));
+      await copyFolder(outside, join(dir, "families"));
+      const back = await snap(library);
+      expect(back.files.has("families/dense-dashboards.json")).toBe(true);
+      expect(back.issues).toEqual([]);
+      expect(back.unlistedFolders).toEqual([]);
     });
   });
 });

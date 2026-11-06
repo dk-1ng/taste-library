@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto";
-import { mkdir, readdir, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { withTempDir } from "@tastelib/testkit";
 import { describe, expect, it } from "vitest";
 import { v1ToV2 } from "../../test/migrations/v1-to-v2.js";
-import { editJson, withGoldenCopy } from "../../test/support/golden.js";
+import { editJson, GOLDEN_V1, withGoldenCopy } from "../../test/support/golden.js";
+import { copyFolder, fileLink, folderLink, SECRET_KEY } from "../../test/support/links-out.js";
 import type { Json } from "../../test/support/library.js";
 import { TEST_REGISTRY } from "../../test/support/registry.js";
 import {
@@ -842,5 +843,195 @@ describe("the report", () => {
       ]);
       expect(reportOf(FORMAT_REGISTRY, result.snapshot, []).issues).toEqual([]);
     });
+  });
+});
+
+describe('links stay inside the library (docs/design.md section 4, "Reading library files")', () => {
+  const ZZZ = "references/ref-20261105-zzzzzz.json";
+
+  async function snapshotOf(library: string) {
+    const opened = await openLibrary(library);
+    if (!opened.ok) throw new Error(opened.message);
+    const result = await opened.library.snapshot();
+    if (!result.ok) throw new Error(result.message);
+    return result.snapshot;
+  }
+
+  it("reports a reference linked to a file outside as unreadable and never opens it", async () => {
+    await withGoldenCopy(async (library, base) => {
+      const outside = join(base, "fora");
+      await mkdir(outside);
+      await writeFile(join(outside, "x.json"), JSON.stringify({ [SECRET_KEY]: 1 }));
+      if (!(await fileLink(join(outside, "x.json"), join(library, ...ZZZ.split("/"))))) return;
+      const snapshot = await snapshotOf(library);
+      expect(pick(snapshot.issues, "unreadable-file")).toEqual([["error", ZZZ, null]]);
+      expect(pick(snapshot.issues, "schema-violation")).toEqual([]);
+      const text = JSON.stringify(snapshot.issues);
+      expect(text).not.toContain(outside);
+      expect(text).not.toContain(SECRET_KEY);
+      expect(snapshot.files.get(ZZZ)?.bytes).toBeNull();
+    });
+  });
+
+  it("lists a format folder that leads outside as unreadable, with everything under it unresolved", async () => {
+    await withGoldenCopy(async (library, base) => {
+      const outside = join(base, "fora");
+      await mkdir(join(outside, "projects"), { recursive: true });
+      await copyFolder(join(library, "references"), join(outside, "references"));
+      await copyFolder(join(library, "families"), join(outside, "families"));
+      await copyFolder(
+        join(library, "projects", "internal-dashboard"),
+        join(outside, "projects", "internal-dashboard"),
+      );
+      await rm(join(library, "references"), { recursive: true });
+      await rm(join(library, "families"), { recursive: true });
+      await rm(join(library, "projects", "internal-dashboard"), {
+        recursive: true,
+      });
+      await folderLink(join(outside, "references"), join(library, "references"));
+      await folderLink(join(outside, "families"), join(library, "families"));
+      await folderLink(
+        join(outside, "projects", "internal-dashboard"),
+        join(library, "projects", "internal-dashboard"),
+      );
+      const snapshot = await snapshotOf(library);
+      expect(pick(snapshot.issues, "unreadable-file")).toEqual([
+        ["error", "families", null],
+        ["error", "projects/internal-dashboard", null],
+        ["error", "references", null],
+      ]);
+      expect(pick(snapshot.issues, "dangling-link")).toEqual([]);
+      expect(snapshot.unlistedFolders).toEqual([
+        "families",
+        "projects/internal-dashboard",
+        "references",
+      ]);
+      for (const path of snapshot.files.keys()) {
+        expect(path).not.toMatch(/^(references|families)\/|^projects\/internal-dashboard\//);
+      }
+      expect(JSON.stringify(snapshot.issues)).not.toContain(base);
+    });
+  });
+
+  it("follows a link that stays inside the library", async () => {
+    await withGoldenCopy(async (library) => {
+      await rename(join(library, "families"), join(library, "families-real"));
+      await folderLink(join(library, "families-real"), join(library, "families"));
+      const snapshot = await snapshotOf(library);
+      expect(snapshot.issues).toEqual([]);
+      expect(snapshot.files.get("families/dense-dashboards.json")?.status).toBe("valid");
+    });
+  });
+
+  it("opens the library folder itself reached through a junction, and writes inside it", async () => {
+    await withGoldenCopy(async (library, base) => {
+      const through = join(base, "atalho");
+      await folderLink(library, through);
+      const opened = await openLibrary(through);
+      if (!opened.ok) throw new Error(opened.message);
+      const first = await opened.library.snapshot();
+      if (!first.ok) throw new Error(first.message);
+      expect(first.snapshot.issues).toEqual([]);
+      const result = await opened.library.write(
+        (snapshot) => {
+          const next = structuredClone(snapshot.files.get("glossary.json")?.value) as Json;
+          next.terms[0].entry.content.definition = "Written through a junction.";
+          return { changes: [{ path: "glossary.json", next }], skipped: [] };
+        },
+        { clock: () => new Date("2026-11-05T10:00:00.000Z") },
+      );
+      expect(result).toMatchObject({
+        status: "written",
+        written: ["glossary.json"],
+      });
+      expect(await readFile(join(library, "glossary.json"), "utf8")).toContain(
+        "Written through a junction.",
+      );
+    });
+  });
+
+  it("reports a library.json linked outside, and refuses a write with that issue", async () => {
+    await withGoldenCopy(async (library, base) => {
+      const outside = join(base, "fora");
+      await mkdir(outside);
+      await copyFolder(join(library, "library.json"), join(outside, "library.json"));
+      await rm(join(library, "library.json"));
+      if (!(await fileLink(join(outside, "library.json"), join(library, "library.json")))) return;
+      const opened = await openLibrary(library);
+      if (!opened.ok) throw new Error(opened.message);
+      const result = await opened.library.write(() => ({
+        changes: [],
+        skipped: [],
+      }));
+      expect(result).toMatchObject({ status: "refused" });
+      if (result.status !== "refused") throw new Error("not refused");
+      expect(result.issues.map((i) => [i.code, i.file])).toEqual([
+        ["unreadable-file", "library.json"],
+      ]);
+      expect(JSON.stringify(result)).not.toContain(base);
+    });
+  });
+
+  it("follows an inside junction in a library under a non-ASCII path", async () => {
+    await withTempDir(async (base) => {
+      const library = join(base, "Usuário", "biblioteca");
+      await mkdir(join(base, "Usuário"));
+      await copyFolder(GOLDEN_V1, library);
+      await rename(join(library, "references"), join(library, "referências-reais"));
+      await folderLink(join(library, "referências-reais"), join(library, "references"));
+      const snapshot = await snapshotOf(library);
+      expect(snapshot.issues).toEqual([]);
+      expect(snapshot.files.has(`references/${A}.json`)).toBe(true);
+    });
+  });
+
+  it("treats a link into the library's own .tastelib/ or .git/ like one that leaves it", async () => {
+    for (const own of [".tastelib", ".git"]) {
+      await withGoldenCopy(async (library) => {
+        await mkdir(join(library, own, "r"), { recursive: true });
+        await copyFolder(join(library, "references"), join(library, own, "r"));
+        await rm(join(library, "references"), { recursive: true });
+        await folderLink(join(library, own, "r"), join(library, "references"));
+        await writeFile(join(library, own, "x.json"), JSON.stringify({ [SECRET_KEY]: 1 }));
+        const snapshot = await snapshotOf(library);
+        expect(pick(snapshot.issues, "unreadable-file")).toEqual([["error", "references", null]]);
+        const message = snapshot.issues.find((i) => i.file === "references")?.message ?? "";
+        expect(message).toContain("working or Git folder");
+        expect(message).not.toContain(library);
+      });
+    }
+  });
+
+  it("treats a file link into .tastelib/ as unreadable and does not open it", async () => {
+    await withGoldenCopy(async (library) => {
+      await mkdir(join(library, ".tastelib"));
+      await writeFile(join(library, ".tastelib", "x.json"), JSON.stringify({ [SECRET_KEY]: 1 }));
+      if (
+        !(await fileLink(join(library, ".tastelib", "x.json"), join(library, ...ZZZ.split("/"))))
+      ) {
+        return;
+      }
+      const snapshot = await snapshotOf(library);
+      expect(pick(snapshot.issues, "unreadable-file")).toEqual([["error", ZZZ, null]]);
+      expect(JSON.stringify(snapshot.issues)).not.toContain(SECRET_KEY);
+    });
+  });
+
+  it("treats references -> .tastelib, references -> .git and a case-variant link as unreadable", async () => {
+    // The case-variant link leads to a name that exists only on a case-insensitive file system
+    // (macOS, Windows); elsewhere it cannot be followed, which is unreadable-file as well.
+    for (const target of [".tastelib", ".git", ".TASTELIB/r"]) {
+      await withGoldenCopy(async (library) => {
+        await mkdir(join(library, ".tastelib", "r"), { recursive: true });
+        await mkdir(join(library, ".git"), { recursive: true });
+        await rm(join(library, "references"), { recursive: true });
+        await folderLink(join(library, ...target.split("/")), join(library, "references"));
+        const snapshot = await snapshotOf(library);
+        expect(pick(snapshot.issues, "unreadable-file"), target).toEqual([
+          ["error", "references", null],
+        ]);
+        expect(pick(snapshot.issues, "dangling-link"), target).toEqual([]);
+      });
+    }
   });
 });

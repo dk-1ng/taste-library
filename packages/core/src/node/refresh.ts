@@ -11,7 +11,7 @@ import {
   type SnapshotFile,
 } from "../validation/library.js";
 import { fingerprintOf, isUnsettled } from "./fingerprint.js";
-import { errno, type Listed, type Listing, listLibrary } from "./listing.js";
+import { errno, type Listed, type Listing, listLibrary, refusedFileMessage } from "./listing.js";
 import { mapLimit } from "./map-limit.js";
 import type { OpenFailure, SnapshotResult } from "./open.js";
 import type { readLibraryFileBytes } from "./read-file.js";
@@ -59,7 +59,10 @@ interface Cached {
   fingerprint: string | null;
   /** Read again at the next refresh whatever its fingerprint. */
   unsettled: boolean;
-  /** The errno of a symbolic link that could not be followed, when that is what was listed. */
+  /**
+   * The errno of a symbolic link that could not be followed, or `refused-outside` or
+   * `refused-own` for a link that is not read, when that is what was listed.
+   */
   brokenLink: string | null;
 }
 
@@ -90,21 +93,25 @@ export function createRefresher(options: RefreshOptions): Refresher {
   /** One file of the listing: reused from the cache, or read again. `null` when it is gone. */
   const refreshFile = async (listed: Listed): Promise<Cached | null> => {
     const cached = cache.get(listed.path);
-    if (listed.brokenLink !== null) {
-      if (cached?.brokenLink === listed.brokenLink) return cached;
-      // A link that cannot be followed is reported, never dropped as if the file were deleted.
+    const blocked = listed.refusal !== null ? `refused-${listed.refusal}` : listed.brokenLink;
+    if (blocked !== null) {
+      if (cached?.brokenLink === blocked) return cached;
+      // A link that cannot be followed, or that leads out of the library, is reported and never
+      // opened; it is not dropped as if the file were deleted.
       const issue = makeIssue(
         "unreadable-file",
         listed.path,
         null,
-        `The path is a symbolic link that cannot be followed (${listed.brokenLink}).`,
+        listed.refusal !== null
+          ? refusedFileMessage(listed.refusal)
+          : `The path is a symbolic link that cannot be followed (${listed.brokenLink}).`,
       );
       const file = checkEntry(registry, {
         path: listed.path,
         kind: listed.kind,
         read: { status: "failed", issue },
       });
-      return { file, fingerprint: null, unsettled: false, brokenLink: listed.brokenLink };
+      return { file, fingerprint: null, unsettled: false, brokenLink: blocked };
     }
     const path = join(root, ...listed.ioSegments);
     if (cached !== undefined && !cached.unsettled && cached.fingerprint !== null) {

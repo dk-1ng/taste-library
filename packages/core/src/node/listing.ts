@@ -1,9 +1,10 @@
 import type { Dirent } from "node:fs";
 import type { readdir } from "node:fs/promises";
-import { stat } from "node:fs/promises";
+import { realpath, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { classifyListedEntry, type FileKind, type FormatRegistry } from "../format.js";
 import { type Issue, makeIssue } from "../validation/issue.js";
+import { isInside } from "./folders.js";
 
 /**
  * Listing the folders of a library (docs/design.md section 3, "Core modules and API"; section 4,
@@ -22,6 +23,45 @@ export interface Listed {
   kind: FileKind;
   /** The errno code when the entry is a symbolic link that cannot be followed: the file cannot be read. */
   brokenLink: string | null;
+  /**
+   * Set when the entry is a link that leaves the library (`outside`) or leads into its own
+   * `.tastelib/` or `.git/` (`own`): the file is never opened.
+   */
+  refusal: Refusal | null;
+}
+
+export type Refusal = "outside" | "own";
+
+/** The message of an `unreadable-file` for a file link that is refused. It never says where the link leads. */
+export function refusedFileMessage(refusal: Refusal): string {
+  return refusal === "outside"
+    ? "The file is a symbolic link or junction that leads outside the library and was not read."
+    : "The file is a symbolic link or junction that leads into the library's own working or Git folder and was not read. Remove the link.";
+}
+
+function refusedFolderMessage(refusal: Refusal): string {
+  return refusal === "outside"
+    ? "The folder is a symbolic link or junction that leads outside the library."
+    : "The folder is a symbolic link or junction that leads into the library's own working or Git folder. Remove the link.";
+}
+
+/**
+ * Where a link at `path` leads, on real folders: outside the library's real folder (`outside`),
+ * into its `.tastelib/` or `.git/` (`own`), or nowhere that is refused. An absent `.tastelib/` or
+ * `.git/` refuses nothing; a link whose position cannot be decided is refused.
+ */
+async function refusalOf(path: string, realRoot: string): Promise<Refusal | null> {
+  const inside = await isInside(path, realRoot);
+  if (inside.status === "failed" || !inside.contained) return "outside";
+  for (const name of [".tastelib", ".git"]) {
+    const own = await isInside(path, join(realRoot, name));
+    if (own.status === "failed") {
+      if (own.errno === "ENOENT" || own.errno === "ENOTDIR") continue;
+      return "own";
+    }
+    if (own.contained) return "own";
+  }
+  return null;
 }
 
 export interface Listing {
@@ -59,6 +99,9 @@ export async function listLibrary(
   list: typeof readdir,
 ): Promise<Listing> {
   const listing: Listing = { files: [], issues: [], unlisted: [] };
+  // The library's real folder, resolved once and only when the first link is met.
+  let realRoot: Promise<string> | null = null;
+  const realRootOf = (): Promise<string> => (realRoot ??= realpath(root));
 
   const walk = async (relative: string, ioSegments: string[], top: boolean): Promise<void> => {
     let dirents: Dirent[];
@@ -100,12 +143,28 @@ export async function listLibrary(
         continue;
       }
       const entry = classifyListedEntry(registry, relative, name, directory);
+      // A link that is followed must stay inside the library (docs/design.md section 4, "Reading
+      // library files"): the entries `readdir` reports as links are the only ones checked.
+      let refusal: Refusal | null = null;
+      if (dirent.isSymbolicLink() && broken === null && entry.type === "folder") {
+        refusal = await refusalOf(join(root, ...childIo), await realRootOf());
+        if (refusal !== null) {
+          listing.unlisted.push(childPath);
+          listing.issues.push(
+            makeIssue("unreadable-file", childPath, null, refusedFolderMessage(refusal)),
+          );
+          continue;
+        }
+      } else if (dirent.isSymbolicLink() && broken === null && entry.type === "file") {
+        refusal = await refusalOf(join(root, ...childIo), await realRootOf());
+      }
       if (entry.type === "file") {
         listing.files.push({
           path: childPath,
           ioSegments: childIo,
           kind: entry.kind,
           brokenLink: broken,
+          refusal,
         });
       } else if (entry.type === "folder") {
         await walk(childPath, childIo, false);
