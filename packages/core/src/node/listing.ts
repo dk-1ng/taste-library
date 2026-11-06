@@ -30,16 +30,23 @@ export interface Listed {
   refusal: Refusal | null;
 }
 
-export type Refusal = "outside" | "own";
+/** `unchecked-<errno>`: the link's place could not be decided, so it is refused all the same. */
+export type Refusal = "outside" | "own" | `unchecked-${string}`;
 
 /** The message of an `unreadable-file` for a file link that is refused. It never says where the link leads. */
 export function refusedFileMessage(refusal: Refusal): string {
+  if (refusal.startsWith("unchecked-")) {
+    return `The file is a symbolic link or junction whose target could not be checked (${refusal.slice(10)}), so it was not read.`;
+  }
   return refusal === "outside"
     ? "The file is a symbolic link or junction that leads outside the library and was not read."
     : "The file is a symbolic link or junction that leads into the library's own working or Git folder and was not read. Remove the link.";
 }
 
 function refusedFolderMessage(refusal: Refusal): string {
+  if (refusal.startsWith("unchecked-")) {
+    return `The folder is a symbolic link or junction whose target could not be checked (${refusal.slice(10)}).`;
+  }
   return refusal === "outside"
     ? "The folder is a symbolic link or junction that leads outside the library."
     : "The folder is a symbolic link or junction that leads into the library's own working or Git folder. Remove the link.";
@@ -48,16 +55,17 @@ function refusedFolderMessage(refusal: Refusal): string {
 /**
  * Where a link at `path` leads, on real folders: outside the library's real folder (`outside`),
  * into its `.tastelib/` or `.git/` (`own`), or nowhere that is refused. An absent `.tastelib/` or
- * `.git/` refuses nothing; a link whose position cannot be decided is refused.
+ * `.git/` refuses nothing; a link whose position cannot be decided is refused as `unchecked-<errno>`.
  */
 async function refusalOf(path: string, realRoot: string): Promise<Refusal | null> {
   const inside = await isInside(path, realRoot);
-  if (inside.status === "failed" || !inside.contained) return "outside";
+  if (inside.status === "failed") return `unchecked-${inside.errno}`;
+  if (!inside.contained) return "outside";
   for (const name of [".tastelib", ".git"]) {
     const own = await isInside(path, join(realRoot, name));
     if (own.status === "failed") {
       if (own.errno === "ENOENT" || own.errno === "ENOTDIR") continue;
-      return "own";
+      return `unchecked-${own.errno}`;
     }
     if (own.contained) return "own";
   }
