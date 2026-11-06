@@ -16,6 +16,11 @@ export interface ReadOk {
   hadBom: boolean;
   /** The text contained a CR character (CRLF line endings). */
   hadCr: boolean;
+  /**
+   * The decoded text, a leading BOM included. Fatal UTF-8 decoding is one-to-one, so two files
+   * have the same bytes exactly when they have the same decoded text (the canonical check).
+   */
+  decoded: string;
 }
 
 export interface ReadFailed {
@@ -325,5 +330,5 @@ export function readLibraryJson(bytes: Uint8Array, file: string): ReadResult {
   }
 
   if (issues.length > 0) return { ok: false, issues };
-  return { ok: true, value: root, hadBom, hadCr };
+  return { ok: true, value: root, hadBom, hadCr, decoded };
 }

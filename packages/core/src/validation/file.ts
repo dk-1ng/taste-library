@@ -1,7 +1,7 @@
 import type { FormatRegistry, LibraryFileKind } from "../format.js";
 import { escapePointerToken, readLibraryJson } from "../json/read.js";
 import { type Issue, makeIssue } from "./issue.js";
-import { escapeControl, validateValue } from "./zod-issues.js";
+import { escapeControl, parseValue } from "./zod-issues.js";
 
 /**
  * The checks within one file (docs/design.md section 4, "Reading library files": "Validation"):
@@ -63,7 +63,8 @@ export function checkLibraryFile(
     registry.versions[registry.current];
   if (spec === undefined) throw new Error(`The registry has no version ${registry.current}.`);
 
-  const issues = validateValue(spec.schemas[kind], read.value, path);
+  const parsed = parseValue(spec.schemas[kind], read.value, path);
+  const issues = parsed.issues;
 
   const identity = spec.layout.identityOf(path, kind);
   // A value that is not an object (`null`, a number) has no identity field; the schema reports it.
@@ -89,8 +90,9 @@ export function checkLibraryFile(
   }
 
   const hasError = issues.some((issue) => issue.severity === "error");
-  if (!hasError) {
-    const canonical = spec.canonical?.(kind, path, bytes, read);
+  // Every issue of a schema is an error, so a file with no error passed its schema.
+  if (!hasError && parsed.success) {
+    const canonical = spec.canonical?.(kind, path, read, parsed.data);
     if (canonical) issues.push(canonical);
   }
   return {
