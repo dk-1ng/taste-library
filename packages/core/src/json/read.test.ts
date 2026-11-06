@@ -39,13 +39,15 @@ describe("readLibraryJson: valid input", () => {
   });
 
   it("keeps __proto__ an own property whatever its value, as JSON.parse does", () => {
-    for (const json of ["null", "1", '"x"', "[]", "{}"]) {
-      const text = `{"a":1,"__proto__":${json},"b":2}`;
-      const result = read(text);
-      const value = result.ok ? (result.value as object) : {};
-      expect(Object.keys(value), json).toEqual(["a", "__proto__", "b"]);
-      expect(Object.getPrototypeOf(value), json).toBe(Object.prototype);
-      expect(value, json).toEqual(JSON.parse(text));
+    for (const key of ["__proto__", "\\u005f_proto__"]) {
+      for (const json of ["null", "1", '"x"', "[]", "{}"]) {
+        const text = `{"a":1,"${key}":${json},"b":2}`;
+        const result = read(text);
+        const value = result.ok ? (result.value as object) : {};
+        expect(Object.keys(value), text).toEqual(["a", "__proto__", "b"]);
+        expect(Object.getPrototypeOf(value), text).toBe(Object.prototype);
+        expect(value, text).toEqual(JSON.parse(text));
+      }
     }
   });
 
