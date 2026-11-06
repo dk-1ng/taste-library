@@ -91,7 +91,7 @@ Then, from the repository root:
 pnpm install     # installs the exact versions in pnpm-lock.yaml
 pnpm -r build    # builds every package in dependency order (same as: pnpm build)
 pnpm clean       # removes the build output of every package
-pnpm check       # lint, format check, typecheck, test and build: run it before every push
+pnpm check       # lint, format check, typecheck, test, build and the size of `docs/design.md`: run it before every push
 pnpm format      # rewrites files to the Biome format
 ```
 
