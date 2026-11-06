@@ -21,4 +21,4 @@ Closes #
 - [ ] Code is original, or dependencies use permissive licenses (recorded in `THIRD_PARTY_NOTICES.md` when bundled).
 - [ ] Works on Linux, Windows and macOS, including non-ASCII paths.
 - [ ] Every commit except merges ends with an `Assisted-by:` trailer (the AI tool used, or `none`).
-- [ ] Documentation (`docs/design.md`, `docs/format-spec.md`, translations) updated if behavior changed.
+- [ ] Documentation (`docs/design.md`, `docs/format-spec.md`, translations) updated if what users or agents see changed (promises and contracts only, no mechanism).

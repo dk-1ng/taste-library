@@ -27,7 +27,8 @@ Everything in this repository is in English: code, comments, docs, issues, commi
 
 ## Rules of the road
 
-- **Design first.** Behavior is defined in `docs/design.md` before code. A change that alters behavior updates `docs/design.md` (and `docs/format-spec.md` for the data format) in the same PR. `docs/design.md` holds behavior and contracts only; internals are documented in the code, plans in the issues.
+- **Design first.** Behavior is defined in `docs/design.md` before code. It records what is visible from outside (commands, options, codes, outputs, the files written, the public API of `core`) and the promises the tool keeps, in one or two sentences each. How the code keeps a promise (steps, order, timings, formulas, retries, internal checks) is not recorded there: the code and its tests are the record. A change to what users or agents see updates `docs/design.md` (and `docs/format-spec.md` for the data format) in the same PR. Plans live in the issues, evidence in the issue or PR.
+- **Reviews grade by promises.** A blocker is code that breaks a promise or a contract of `docs/design.md` or `docs/format-spec.md`, or a hard rule, under a condition in scope of `docs/design.md` §14; or a change to what users or agents see that the docs do not record. Code that differs from a description of mechanism is not a blocker: the fix is to remove the description.
 - **Reversibility.** Confirm with the maintainer before anything outward-facing or hard to reverse: publishing, force pushes, deleting branches, issues or repositories, changing repository settings.
 - **Report faithfully.** If tests fail, say so with the output. If a step was skipped, say so.
 - **Synthetic test data only**, generated locally. Never copy fixtures from third parties.

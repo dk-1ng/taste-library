@@ -1,10 +1,12 @@
 # Design
 
-This document is the source of truth for how taste-library behaves. Behavior is defined here before it is built, and a change that alters behavior updates this document in the same pull request. The on-disk data format is specified separately in [format-spec.md](format-spec.md), the public contract that the tool, agents and integrations follow.
+This document is the source of truth for what taste-library does. Behavior is defined here before it is built, and a change to what users or agents see updates this document in the same pull request. The on-disk data format is specified separately in [format-spec.md](format-spec.md), the public contract that the tool, agents and integrations follow.
 
-**Scope.** This document specifies behavior and contracts: what the user, agents and other packages see, meaning how the format is used, error and result codes, guarantees, the commands, and the public API of `core`. Internal structure (module layout, internal functions, test helpers and their options) is documented next to the code, in its doc comments. Implementation plans live in the issues, and the reasons behind each decision, with the evidence and measurements, live in the decision log (§18).
+**Scope.** This document records what is visible from outside (the commands, their options, codes and outputs, the files the tool writes, and the public API of `core`) and the promises the tool keeps, in one or two sentences each. How the code keeps a promise (steps, order, timings, formulas, retries, internal checks) is not recorded here: the code and its tests are the record, with a doc comment where a reason would otherwise be lost. Plans live in the issues; the decision log (§18) holds one row per live decision, and the evidence lives in the issue or pull request it names.
 
-This document is long: agents and people read it by section, the headings first (`grep -n '^#' docs/design.md`), then the sections they need (`CLAUDE.md`, "Reading the docs").
+**Reviews grade by promises** (§14 "Threat model"). A blocker is code that breaks a promise or a contract of this document or of format-spec, or a hard rule, under a condition in scope of §14; or a change to what users or agents see that the docs do not record. Code that differs from a description of mechanism is not a blocker: the fix is to remove the description.
+
+Agents and people read this document by section, the headings first (`grep -n '^#' docs/design.md`), then the sections they need (`CLAUDE.md`, "Reading the docs").
 
 Sections marked **(to specify in Mx)** are placeholders that the named milestone fills in.
 
@@ -680,7 +682,7 @@ The interface language is a per-machine setting (§4). The library's `language` 
 
 See [SECURITY.md](../SECURITY.md) for the sensitive surfaces. The local server listens on the loopback interface only and rejects cross-origin requests.
 
-**Threat model.** The tool is used by one person, on their own computer, with their own account. This list says which conditions the tool must handle and which it need not. A review grades its findings by it (the `continue` skill, step 6; the full list is in `.claude/agents/reviewer.md`): for example, a wrong result, lost data, a crash, a hang or a broken promise of this document or of format-spec under a condition in scope is a blocker; the same problem under a condition out of scope is minor.
+**Threat model.** The tool is used by one person, on their own computer, with their own account. This list says which conditions the tool must handle and which it need not. A review grades its findings by it and by promises (the `continue` skill, step 6; the full list is in `.claude/agents/reviewer.md`): code that breaks a promise or a contract of this document or of format-spec, or a hard rule, under a condition in scope, is a blocker, and so is a change to what users or agents see that the docs do not record; the same problem under a condition out of scope is minor. Code that differs from a description of mechanism is not a blocker: the fix is to remove the description.
 
 - **In scope:**
   - **The user's own mistakes:** a hand-edited file with typos, wrong types, duplicate ids or broken links; a hand-resolved Git merge; a file deleted or moved by hand.
