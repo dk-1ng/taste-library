@@ -6,7 +6,6 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type Generated, generateLibrary } from "../../test/support/generate.js";
 import type { Json } from "../../test/support/library.js";
 import type { Snapshot } from "../validation/library.js";
-import { mapLimit } from "./map-limit.js";
 import { type Library, type OpenOptions, openLibrary } from "./open.js";
 import { readLibraryFileBytes } from "./read-file.js";
 import type { StatFn } from "./refresh.js";
@@ -111,6 +110,23 @@ async function timed<T>(fn: () => Promise<T>): Promise<{ ms: number; value: T }>
 
 const paths = (): string[] => generated.files.map((file) => join(root, ...file.split("/")));
 
+/**
+ * Runs `fn` over `items` with `IN_FLIGHT` workers. Written here on purpose: the baselines
+ * must not share code with the production scan, or a slowdown there would move both sides.
+ */
+async function pool<T, R>(items: readonly T[], fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array<R>(items.length);
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await fn(items[index] as T);
+    }
+  };
+  await Promise.all(Array.from({ length: IN_FLIGHT }, worker));
+  return results;
+}
+
 /** Baselines measured on the same files, just before a line. */
 interface Baselines {
   /** `fs.promises.stat` of every file, 16 in flight. */
@@ -126,7 +142,7 @@ interface Baselines {
 async function measureBaselines(extra: { readParse?: boolean; durableWrite?: boolean }) {
   const files = paths();
   const out: Baselines = {
-    statScanMs: (await timed(() => mapLimit(files, IN_FLIGHT, (path) => stat(path)))).ms,
+    statScanMs: (await timed(() => pool(files, (path) => stat(path)))).ms,
     statSyncMs: (
       await timed(async () => {
         for (const path of files) statSync(path);
@@ -135,9 +151,7 @@ async function measureBaselines(extra: { readParse?: boolean; durableWrite?: boo
   };
   if (extra.readParse) {
     out.readParseMs = (
-      await timed(() =>
-        mapLimit(files, IN_FLIGHT, async (path) => JSON.parse(await readFile(path, "utf8"))),
-      )
+      await timed(() => pool(files, async (path) => JSON.parse(await readFile(path, "utf8"))))
     ).ms;
   }
   if (extra.durableWrite) {
