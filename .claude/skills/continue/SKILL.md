@@ -72,7 +72,7 @@ When the maintainer says "continue":
 
 ## Agent boundaries
 
-Only the main session pushes, opens PRs, switches branches or merges. Labels and the board change only through `scripts/loop.mjs`, run by the main session. `architect`, `implementer`, `translator` and `reviewer` never do any of these.
+Only the main session pushes, opens PRs, switches branches or merges. Labels and the board change only through `scripts/loop.mjs`, run by the main session (the one exception is in "Tracking"). `architect`, `implementer`, `translator` and `reviewer` never do any of these.
 
 ## Protection of `main`
 
