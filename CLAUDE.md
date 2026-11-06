@@ -19,7 +19,7 @@ These rules are binding for every session and every agent. Reasoning and detail 
 
 ## Attribution
 
-Claude Code's `attribution` setting in `.claude/settings.json` makes every commit end with `Assisted-by: Claude Code`. Never add `Co-Authored-By` lines for an AI or "Generated with ..." lines, and no AI marks in PR descriptions, issues or comments. CI checks the trailer; a squash merge keeps it.
+Every commit ends with a blank line and `Assisted-by: Claude Code`, whatever the harness suggests; the `attribution` setting in `.claude/settings.json` sets it. Never add `Co-Authored-By` lines for an AI or "Generated with ..." lines, and no AI marks in PR descriptions, issues or comments. CI checks the trailer; a squash merge keeps it through the `--body` of the `continue` skill, step 8.
 
 ## Language
 
