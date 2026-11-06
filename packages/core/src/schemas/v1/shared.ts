@@ -166,7 +166,7 @@ const TIMESTAMP_FIELDS = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})\.\d{3
  * Whether a string is a UTC timestamp with milliseconds that names a real time: exactly the
  * strings that round-trip through `Date` (format-spec §4.1), checked with calendar arithmetic
  * instead, because two `Date` round trips per timestamp were a measurable part of opening a
- * library (docs/design.md section 4, "Index", "Measured on the implementation").
+ * library (docs/design.md section 18, the row on the budget failures of the index).
  */
 export function isTimestamp(value: string): boolean {
   const match = TIMESTAMP_FIELDS.exec(value);

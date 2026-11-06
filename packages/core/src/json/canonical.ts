@@ -162,8 +162,8 @@ export function isCanonical(type: FileType, value: unknown, bytes: Uint8Array): 
  * schema's key order), so the schema does not run a second time. The canonical text is compared
  * with the decoded text, BOM included, which gives the verdict of `isCanonical` on the bytes:
  * the reader's fatal UTF-8 decoding is one-to-one, and a valid value holds no lone surrogate, so
- * the canonical text encodes to exactly one byte sequence (docs/design.md section 4, "Index",
- * "Measured on the implementation").
+ * the canonical text encodes to exactly one byte sequence (docs/design.md section 18, the row on
+ * the budget failures of the index).
  */
 export function canonicalIssue(
   type: FileType,

@@ -27,7 +27,7 @@ Everything in this repository is in English: code, comments, docs, issues, commi
 
 ## Rules of the road
 
-- **Design first.** Behavior is defined in `docs/design.md` before code. A change that alters behavior updates `docs/design.md` (and `docs/format-spec.md` for the data format) in the same PR.
+- **Design first.** Behavior is defined in `docs/design.md` before code. A change that alters behavior updates `docs/design.md` (and `docs/format-spec.md` for the data format) in the same PR. `docs/design.md` holds behavior and contracts only; internals are documented in the code, plans in the issues.
 - **Reversibility.** Confirm with the maintainer before anything outward-facing or hard to reverse: publishing, force pushes, deleting branches, issues or repositories, changing repository settings.
 - **Report faithfully.** If tests fail, say so with the output. If a step was skipped, say so.
 - **Synthetic test data only**, generated locally. Never copy fixtures from third parties.
