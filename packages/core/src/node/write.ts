@@ -16,7 +16,7 @@ import { type Issue, makeIssue } from "../validation/issue.js";
 import type { Snapshot } from "../validation/library.js";
 import { sortIssues } from "../validation/report.js";
 import { type Migrated, type PendingCleanup, resumeCleanup, runMigration } from "./migrate.js";
-import { BACKUP, backupPresent } from "./migration-backup.js";
+import { BACKUP, backupPresent, TOOL_FOLDER } from "./migration-backup.js";
 import type { OpenFailure, SnapshotResult } from "./open.js";
 import type { Written } from "./refresh.js";
 import {
@@ -169,7 +169,37 @@ async function gate(
 ): Promise<Gated> {
   const fs: FileSystem = options.fs ?? realFileSystem;
   let snapshot = refreshed;
-  // 2. The migration backup. First, a cleanup of this handle's own migration that failed is
+  // 2. `.tastelib` must be a real folder: a link or junction there, wherever it leads, refuses
+  //    every write before anything is looked for or written in it.
+  try {
+    if ((await fs.lstat(join(context.root, TOOL_FOLDER))).isSymbolicLink()) {
+      return {
+        stop: refused([
+          makeIssue(
+            "unreadable-file",
+            TOOL_FOLDER,
+            null,
+            "The .tastelib folder is a symbolic link or junction; it must be a real folder. Remove the link.",
+          ),
+        ]),
+      };
+    }
+  } catch (error) {
+    const errno = errnoOf(error);
+    if (errno === undefined) throw error;
+    if (errno !== "ENOENT" && errno !== "ENOTDIR") {
+      return {
+        stop: failed({
+          code: "io-error",
+          operation: "lstat",
+          file: TOOL_FOLDER,
+          errno,
+          message: `The .tastelib folder cannot be looked at (${errno}).`,
+        }),
+      };
+    }
+  }
+  //    The migration backup. First, a cleanup of this handle's own migration that failed is
   //    finished, as the owner, if `owner.json` still holds its bytes; it changes library files, so
   //    the snapshot is refreshed again.
   const memory = context.cleanup;
@@ -392,11 +422,22 @@ function blockingIssues(registry: FormatRegistry, snapshot: Snapshot, plan: Plan
   const layout = currentLayout(registry);
   const seen = new Set<string>();
   const issues: Issue[] = [];
+  const seenFolders = new Set<string>();
   for (const change of plan.changes) {
     if (seen.has(change.path)) throw new Error(`The plan changes "${change.path}" twice.`);
     seen.add(change.path);
     const kind = kindOfPath(layout, change.path);
     if (kind === null) throw new Error(`"${change.path}" is not a file of the format.`);
+    // A change under a folder that could not be listed (a link out of the library, for example)
+    // is refused with that folder's issues: the folder's files are unknown.
+    const folder = unlistedFolderOf(snapshot, change.path);
+    if (folder !== undefined) {
+      if (!seenFolders.has(folder)) {
+        seenFolders.add(folder);
+        issues.push(...snapshot.issues.filter((issue) => issue.file === folder));
+      }
+      continue;
+    }
     const existing = snapshot.files.get(change.path);
     if (change.next === null) {
       if (kind === "library") throw new Error("A plan may not delete library.json.");
@@ -419,8 +460,8 @@ function blockingIssues(registry: FormatRegistry, snapshot: Snapshot, plan: Plan
     if (folder === undefined) {
       throw new Error(`The plan is blocked by "${path}", which the snapshot does not hold.`);
     }
-    if (seen.has(folder)) continue;
-    seen.add(folder);
+    if (seenFolders.has(folder)) continue;
+    seenFolders.add(folder);
     issues.push(...snapshot.issues.filter((issue) => issue.file === folder));
   }
   return issues;
