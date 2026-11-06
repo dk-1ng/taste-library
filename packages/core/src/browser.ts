@@ -19,13 +19,21 @@ export {
 } from "./changes/remove-links.js";
 export type {
   EntryClass,
+  FileKind,
   FormatLayout,
   FormatRegistry,
   FormatVersionSpec,
   LibraryFileKind,
   SchemaSet,
 } from "./format.js";
-export { CURRENT_FORMAT_VERSION, classifyEntry, currentLayout, FORMAT_REGISTRY } from "./format.js";
+export {
+  applySteps,
+  CURRENT_FORMAT_VERSION,
+  classifyEntry,
+  currentLayout,
+  currentSpec,
+  FORMAT_REGISTRY,
+} from "./format.js";
 export type { IdOptions, RandomSource, RefIdOptions } from "./ids/random.js";
 export {
   newGuardrailId,
@@ -57,6 +65,7 @@ export type { LinkState, LinkTarget, Targets } from "./library-index/targets.js"
 export { buildTargets, targetFileOf, targetKey } from "./library-index/targets.js";
 export type { VersionSummary } from "./library-index/versions.js";
 export { versionSummary } from "./library-index/versions.js";
+export type { LibraryValues, MigrationStep } from "./migrations/steps.js";
 export {
   CURRENT_MARKER_VERSION,
   MARKER_REGISTRY,

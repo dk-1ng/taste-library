@@ -1,4 +1,4 @@
-import type { LibraryFileKind } from "../format.js";
+import type { FileKind } from "../format.js";
 import type { FileValue } from "../json/canonical.js";
 import {
   buildTargets,
@@ -24,7 +24,7 @@ import { describePath, pointerOf } from "./zod-issues.js";
  */
 
 export interface CrossFile {
-  kind: LibraryFileKind;
+  kind: FileKind;
   status: FileStatus;
   formatVersion: number | null;
   /** The parsed value; present when the status is `valid`. */

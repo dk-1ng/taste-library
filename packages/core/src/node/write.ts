@@ -4,11 +4,11 @@ import type { Plan, Skipped } from "../changes/plan.js";
 import {
   classifyEntry,
   currentLayout,
+  currentSpec,
   type FormatLayout,
   type FormatRegistry,
-  type LibraryFileKind,
+  type FileKind,
 } from "../format.js";
-import { canonicalize, serialize } from "../json/canonical.js";
 import { differsBesidesUpdatedAt, stampFile } from "../model/timestamps.js";
 import { Slug } from "../schemas/v1/shared.js";
 import { type CrossFile, crossFileIssues, type LinkEvent } from "../validation/cross.js";
@@ -110,7 +110,7 @@ async function backupPresent(root: string): Promise<boolean> {
 }
 
 /** The type of the file at `path`, or `null` when the format has no such file. */
-export function kindOfPath(layout: FormatLayout, path: string): LibraryFileKind | null {
+export function kindOfPath(layout: FormatLayout, path: string): FileKind | null {
   const segments = path.split("/");
   let parent = "";
   for (const [index, name] of segments.entries()) {
@@ -231,7 +231,7 @@ function linksOf(
 /** A change after validation: the canonical new value, or `null` for a deletion. */
 interface Prepared {
   path: string;
-  kind: LibraryFileKind;
+  kind: FileKind;
   value: unknown;
   /** The bytes the snapshot read, or `"absent"` for a new file. */
   expected: Expected;
@@ -354,7 +354,7 @@ const encoder = new TextEncoder();
 /** One file ready for the disk: its final bytes and their check, or `null` for a deletion. */
 interface Ready {
   path: string;
-  kind: LibraryFileKind;
+  kind: FileKind;
   bytes: Uint8Array | null;
   check: FileCheck | null;
   expected: Expected;
@@ -399,14 +399,15 @@ export async function runWrite(
 
   // 4. Validate every new value: the schema and every rule within the file.
   const layout = currentLayout(registry);
+  const spec = currentSpec(registry);
   const problems: Issue[] = [];
   const prepared: Prepared[] = [];
   for (const change of plan.changes) {
     const path = change.path;
-    const kind = kindOfPath(layout, path) as LibraryFileKind;
+    const kind = kindOfPath(layout, path) as FileKind;
     const existing = snapshot.files.get(path);
     const expected: Expected = existing?.bytes ?? "absent";
-    const previous = existing === undefined ? null : canonicalize(kind, existing.value);
+    const previous = existing === undefined ? null : spec.canonicalize(kind, existing.value);
     if (change.next === null) {
       prepared.push({ path, kind, value: null, expected, previous });
       continue;
@@ -427,7 +428,7 @@ export async function runWrite(
     }
     problems.push(...errors);
     if (checked.status !== "valid" || errors.length > 0) continue;
-    const value = canonicalize(kind, checked.value);
+    const value = spec.canonicalize(kind, checked.value);
     // A change that changes nothing is dropped, so a file that is merely not canonical is not rewritten.
     if (previous !== null && !differsBesidesUpdatedAt(previous, value)) continue;
     prepared.push({ path, kind, value, expected, previous });
@@ -443,7 +444,7 @@ export async function runWrite(
   const now = (options.clock?.() ?? new Date()).toISOString();
   const ready: Ready[] = prepared.map(({ path, kind, value, expected, previous }) => {
     if (value === null) return { path, kind, bytes: null, check: null, expected };
-    const bytes = encoder.encode(serialize(kind, stampFile(kind, previous, value, now)));
+    const bytes = encoder.encode(spec.serialize(kind, stampFile(kind, previous, value, now)));
     const final = checkLibraryFile(registry, kind, path, bytes);
     if (final.status !== "valid" || final.issues.length > 0) {
       throw new Error(

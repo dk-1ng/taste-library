@@ -118,6 +118,11 @@ const FILES = {
 
 export type FileType = keyof typeof FILES;
 
+/** Whether `kind` is one of the file types of version 1 (an own key, never `constructor`). */
+export function isFileType(kind: string): kind is FileType {
+  return Object.hasOwn(FILES, kind);
+}
+
 /** The value type of each file type. */
 export type FileValue<K extends FileType> = z.infer<(typeof FILES)[K]["schema"]>;
 
@@ -128,19 +133,26 @@ export type FileValue<K extends FileType> = z.infer<(typeof FILES)[K]["schema"]>
  * @throws ZodError when `value` does not pass the schema.
  */
 export function canonicalize<K extends FileType>(type: K, value: unknown): FileValue<K> {
-  const file = FILES[type];
-  const parsed: unknown = file.schema.parse(value);
-  return file.order(parsed) as FileValue<K>;
+  return canonicalOrder(type, FILES[type].schema.parse(value)) as FileValue<K>;
+}
+
+/**
+ * The lists of `parsed` sorted and its proportions rounded as the specification states for each
+ * file type, without running the schema: `parsed` is a schema's output, whose keys already follow
+ * the schema's order. A test-only version 2 orders its files of the same types this way too.
+ */
+export function canonicalOrder(type: FileType, parsed: unknown): unknown {
+  return FILES[type].order(parsed);
 }
 
 /** Two-space JSON plus one LF, no BOM (format-spec §3.1, §3.3), of a canonical value. */
-function textOf(canonical: unknown): string {
+export function canonicalText(canonical: unknown): string {
   return `${JSON.stringify(canonical, null, 2)}\n`;
 }
 
 /** The canonical text of a file: two-space JSON plus one LF, no BOM (format-spec §3.1, §3.3). */
 export function serialize<K extends FileType>(type: K, value: unknown): string {
-  return textOf(canonicalize(type, value));
+  return canonicalText(canonicalize(type, value));
 }
 
 /**
@@ -171,7 +183,16 @@ export function canonicalIssue(
   read: ReadOk,
   parsed: unknown,
 ): Issue | null {
-  if (textOf(FILES[type].order(parsed)) === read.decoded) return null;
+  return notCanonicalIssue(file, read, canonicalText(canonicalOrder(type, parsed)));
+}
+
+/**
+ * The `not-canonical` warning when the decoded text of `read` is not `canonical`, the canonical
+ * text of its value, or `null` when it is. The message names a BOM or CRLF when the reader saw
+ * one.
+ */
+export function notCanonicalIssue(file: string, read: ReadOk, canonical: string): Issue | null {
+  if (canonical === read.decoded) return null;
   const causes: string[] = [];
   if (read.hadBom) causes.push("a byte order mark");
   if (read.hadCr) causes.push("CRLF line endings");

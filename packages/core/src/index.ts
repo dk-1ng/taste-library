@@ -9,7 +9,10 @@
  * - `schemas/v<N>/` (pure): the frozen zod schemas of format version N (format-spec §15.4):
  *   `shared.ts` for §4 of the spec, one module per file type, and `set.ts`, the schema set.
  * - `format.ts` (pure): `CURRENT_FORMAT_VERSION` and the format registry, with each version's
- *   schema set and folder layout (which relative paths are which file type).
+ *   file kinds (schema set and folder layout: which relative paths are which kind), its canonical
+ *   form, and the steps between versions, applied in memory by `applySteps`.
+ * - `migrations/` (pure): the migration steps, one module per step (`v<N>-to-v<N+1>.ts`), and
+ *   the production step table (`steps.ts`, empty at version 1) (format-spec §15.4).
  * - `marker.ts` (pure): the media marker's own registry and steps (format-spec §15.1).
  * - `validation/` (pure): the `Issue` type and the codes with their severities, the mapping
  *   from zod issues to issues with pointers and English messages, the checks within one file,

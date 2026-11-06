@@ -1,4 +1,4 @@
-import type { FormatRegistry, LibraryFileKind } from "../format.js";
+import type { FormatRegistry, FileKind } from "../format.js";
 import { buildIndex, type LibraryIndex } from "../library-index/build.js";
 import { buildTargets } from "../library-index/targets.js";
 import { versionSummary } from "../library-index/versions.js";
@@ -19,7 +19,7 @@ export type EntryRead = { status: "ok"; bytes: Uint8Array } | { status: "failed"
 export interface LibraryEntry {
   /** Relative to the library, with `/`, in Unicode NFC. */
   path: string;
-  kind: LibraryFileKind;
+  kind: FileKind;
   read: EntryRead;
   /** The fingerprint of what was read (docs/design.md section 4, "Index", "Freshness"); `null` by default. */
   fingerprint?: string | null;
@@ -27,7 +27,7 @@ export interface LibraryEntry {
 
 export interface SnapshotFile {
   path: string;
-  kind: LibraryFileKind;
+  kind: FileKind;
   /** The exact bytes read, kept for the optimistic write check (format-spec §5); `null` when the file could not be read. */
   bytes: Uint8Array | null;
   /** `(size, mtime, ctime, inode)` of the file read, or `null` (a snapshot built in memory, or bytes just written). */

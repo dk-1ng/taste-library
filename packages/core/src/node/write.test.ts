@@ -459,13 +459,14 @@ describe("the write gate", () => {
 
   it("refuses a mixed library until the migration runner exists", async () => {
     await withGoldenCopy(async (dir) => {
-      await writeFile(
-        join(dir, "library.json"),
-        `${JSON.stringify({ formatVersion: 2, anything: true }, null, 2)}\n`,
-      );
+      await editJson(dir, "library.json", (value) => {
+        value.formatVersion = 2;
+      });
       const before = await tree(dir);
       const library = await open(dir, TEST_REGISTRY);
-      const result = await edit(library, "glossary.json", () => undefined);
+      const result = await edit(library, "guardrails.json", (file) => {
+        file.guardrails[0].rule.content.text = "No banners that compete with the content.";
+      });
       expect(result.status).toBe("refused");
       if (result.status === "refused") {
         expect(result.issues.map((i) => i.code)).toContain("mixed-format-versions");
@@ -640,11 +641,16 @@ describe("refusals", () => {
 
   it("refuses a valid value of an older format version when the tool writes a newer one", async () => {
     await withTempDir(async (dir) => {
-      await writeFile(join(dir, "library.json"), `${JSON.stringify({ formatVersion: 2 })}\n`);
+      const golden = await json(GOLDEN_V1, "library.json");
+      await writeFile(
+        join(dir, "library.json"),
+        `${JSON.stringify({ ...golden, formatVersion: 2 }, null, 2)}\n`,
+      );
       const library = await open(dir, TEST_REGISTRY);
       const result = await library.write(
         () => ({
-          changes: [{ path: "glossary.json", next: { formatVersion: 1, terms: [] } }],
+          // A valid version 1 file, of a kind version 2 still has.
+          changes: [{ path: "guardrails.json", next: { formatVersion: 1, guardrails: [] } }],
           skipped: [],
         }),
         { clock },

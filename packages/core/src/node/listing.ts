@@ -2,12 +2,7 @@ import type { Dirent } from "node:fs";
 import type { readdir } from "node:fs/promises";
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
-import {
-  classifyEntry,
-  currentLayout,
-  type FormatRegistry,
-  type LibraryFileKind,
-} from "../format.js";
+import { classifyEntry, currentLayout, type FormatRegistry, type FileKind } from "../format.js";
 import { type Issue, makeIssue } from "../validation/issue.js";
 
 /**
@@ -23,7 +18,7 @@ export interface Listed {
   path: string;
   /** The names as the file system gave them, to read the file back. */
   ioSegments: string[];
-  kind: LibraryFileKind;
+  kind: FileKind;
   /** The errno code when the entry is a symbolic link that cannot be followed: the file cannot be read. */
   brokenLink: string | null;
 }

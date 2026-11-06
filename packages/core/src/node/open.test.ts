@@ -375,16 +375,18 @@ describe("version codes", () => {
       await editJson(library, "library.json", (v) => {
         v.formatVersion = 2;
       });
-      const issues = await issuesOf(library, TEST_REGISTRY);
-      const mixed = pick(issues, "mixed-format-versions");
-      // Every other file is still at version 1.
-      expect(mixed).toHaveLength(12);
-      expect(mixed).toContainEqual(["warning", `references/${A}.json`, "/formatVersion"]);
-      expect(
-        mixed.every(
-          ([severity, , pointer]) => severity === "warning" && pointer === "/formatVersion",
-        ),
-      ).toBe(true);
+      const opened = await openLibrary(library, { registry: TEST_REGISTRY });
+      if (!opened.ok) throw new Error(opened.message);
+      const result = await opened.library.snapshot();
+      if (!result.ok) throw new Error(result.message);
+      const issues = result.snapshot.issues;
+      // Every other file is still at version 1, so each of them is reported, and nothing else.
+      const others = [...result.snapshot.files.keys()].filter((path) => path !== "library.json");
+      expect(others.length).toBeGreaterThanOrEqual(11);
+      expect(pick(issues, "mixed-format-versions")).toEqual(
+        others.map((path) => ["warning", path, "/formatVersion"]),
+      );
+      expect(others).toContain(`references/${A}.json`);
       expect(pick(issues, "needs-migration")).toEqual([]);
       // Files at an older version are checked against the schemas of that version, and links are not followed.
       expect(issues.filter((i) => i.severity === "error")).toEqual([]);

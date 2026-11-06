@@ -3,8 +3,9 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { generateLibrary } from "../../test/support/generate.js";
 import { GOLDEN_V1 } from "../../test/support/golden.js";
-import { FORMAT_REGISTRY, type FormatRegistry, type LibraryFileKind } from "../format.js";
-import { serialize } from "../json/canonical.js";
+import { TEST_REGISTRY } from "../../test/support/registry.js";
+import { type FileKind, FORMAT_REGISTRY, type FormatRegistry } from "../format.js";
+import { isFileType, serialize } from "../json/canonical.js";
 import { openLibrary } from "../node/open.js";
 import { checkLibraryFile } from "./file.js";
 
@@ -115,8 +116,11 @@ describe("checkLibraryFile", () => {
             project: z.looseObject({ formatVersion: z.literal(1), slug: z.string() }),
           },
           layout: v1.layout,
+          canonicalize: v1.canonicalize,
+          serialize: v1.serialize,
         },
       },
+      steps: {},
     };
     const slug = "caf\u00e9"; // precomposed, as typed
     const path = `projects/${slug.normalize("NFD")}/project.json`; // as macOS may list it
@@ -137,6 +141,69 @@ describe("checkLibraryFile", () => {
   });
 });
 
+describe("a file at a path its own version does not have (format-spec §15.2)", () => {
+  const term = {
+    id: "term-2b4d6f",
+    createdAt: "2026-11-02T12:00:00.000Z",
+    updatedAt: "2026-11-02T12:00:00.000Z",
+    pieces: [],
+    entry: {
+      origin: "user",
+      content: { term: "Quiet density", definition: "Much information, little noise." },
+      writtenAt: "2026-11-02T12:00:00.000Z",
+    },
+  };
+  const violation = (file: string, formatVersion: number | null) => ({
+    status: "invalid",
+    formatVersion,
+    value: null,
+    issues: [
+      {
+        severity: "error",
+        code: "schema-violation",
+        file,
+        pointer: "/formatVersion",
+        message: expect.stringMatching(/^formatVersion: /),
+      },
+    ],
+  });
+
+  it("is a schema-violation at /formatVersion for a file of a version that has no such path", () => {
+    // `glossary/<term-id>.json` is a file of the test-only version 2, never of version 1.
+    const path = "glossary/term-2b4d6f.json";
+    expect(
+      checkLibraryFile(
+        TEST_REGISTRY,
+        "glossary-term",
+        path,
+        bytes(JSON.stringify({ formatVersion: 1, ...term })),
+      ),
+    ).toEqual(violation(path, 1));
+    // The same file at version 2 is valid.
+    expect(
+      checkLibraryFile(
+        TEST_REGISTRY,
+        "glossary-term",
+        path,
+        bytes(JSON.stringify({ formatVersion: 2, ...term })),
+      ),
+    ).toMatchObject({ status: "valid", formatVersion: 2 });
+  });
+
+  it("is a schema-violation at /formatVersion for a file a later version removed", () => {
+    // Version 2 split `glossary.json` into one file per term.
+    const glossary = bytes(JSON.stringify({ formatVersion: 2, terms: [term] }));
+    expect(checkLibraryFile(TEST_REGISTRY, "glossary", "glossary.json", glossary)).toEqual(
+      violation("glossary.json", 2),
+    );
+    // Without a valid version, the file is checked against the current version, which has no such path.
+    const unknown = bytes(JSON.stringify({ formatVersion: "one", terms: [term] }));
+    expect(checkLibraryFile(TEST_REGISTRY, "glossary", "glossary.json", unknown)).toEqual(
+      violation("glossary.json", null),
+    );
+  });
+});
+
 describe("a file whose whole content is null", () => {
   it.each([
     ["references/ref-20261101-a1b2c3.json", "reference"],
@@ -154,7 +221,8 @@ describe("the canonical check gives the verdict of a byte comparison with serial
   const decoder = new TextDecoder();
 
   /** The verdict by its definition (format-spec §3.3): the bytes equal `serialize` of the value. */
-  function byteVerdict(kind: LibraryFileKind, value: unknown, given: Uint8Array): boolean {
+  function byteVerdict(kind: FileKind, value: unknown, given: Uint8Array): boolean {
+    if (!isFileType(kind)) throw new Error(`${kind} is not a kind of version 1`);
     const expected = bytes(serialize(kind, value));
     return expected.length === given.length && expected.every((byte, i) => byte === given[i]);
   }
