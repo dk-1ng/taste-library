@@ -184,9 +184,9 @@ export async function attachMediaFolder(
     message: string,
     issues: Issue[] = [],
   ): AttachResult => ({ status: "refused", code, message, issues });
-  const failed = (operation: string, error: unknown): AttachResult => ({
+  const failed = (operation: string, error: unknown, file = "media:"): AttachResult => ({
     status: "failed",
-    failure: ioFailure(operation, "media:", error),
+    failure: ioFailure(operation, file, error),
   });
 
   // 1. Not a folder.
@@ -236,7 +236,8 @@ export async function attachMediaFolder(
   // 3. Containing the library.
   if (exists) {
     const containing = await isInside(library.path, path, platform);
-    if (containing.status === "failed") return failed("stat", { code: containing.errno });
+    if (containing.status === "failed")
+      return failed("stat", { code: containing.errno }, "library:");
     if (containing.contained) {
       return refuse(
         "library-inside-media",

@@ -466,6 +466,7 @@ describe("a lost race on the marker", () => {
       });
       expect(refusal(result)).toBe("write-conflict");
       expect(await readFile(join(media, MARKER_FILE), "utf8")).toContain(OTHER);
+      expect(await readdir(media)).toEqual([MARKER_FILE]);
     });
   });
 
@@ -484,6 +485,7 @@ describe("a lost race on the marker", () => {
         write,
       });
       expect(refusal(again)).toBe("write-conflict");
+      expect(await readdir(media)).toEqual([MARKER_FILE]);
     });
   });
 });
@@ -522,16 +524,14 @@ describe("the marker and the library", () => {
       );
       expect(result.status).toBe("written");
 
-      // An older marker (version 1 beside a version 2 tool) is not a mixed-version library either.
-      await writeFile(
-        join(media, MARKER_FILE),
-        serialize("marker", { formatVersion: 1, libraryId: id }),
-      );
+      // The version 3 marker is still on disk: it is newer-format, and never a mixed-version library.
       const snapshot = await opened.library.snapshot();
       if (!snapshot.ok) throw new Error(snapshot.message);
       const issues = await checkMedia(snapshot.snapshot, media, {});
       const report = reportOf(FORMAT_REGISTRY, snapshot.snapshot, issues);
-      expect(report.issues.map((issue) => issue.code)).not.toContain("mixed-format-versions");
+      const codes = report.issues.map((issue) => [issue.code, issue.file]);
+      expect(codes).toContainEqual(["newer-format", `media:${MARKER_FILE}`]);
+      expect(codes.map(([code]) => code)).not.toContain("mixed-format-versions");
     });
   });
 });
