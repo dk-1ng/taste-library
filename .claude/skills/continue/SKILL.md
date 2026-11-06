@@ -29,7 +29,7 @@ One issue per session. A new session knows nothing about the previous one; every
 - A spike or `complexity: high` issue goes to `architect` (effort `xhigh`), then to `implementer` called with model `opus` and effort `high`, whatever the main session runs on.
 - A bug that survived one fix goes to `architect` (effort `xhigh`). In a review, that is a blocker a re-review reports as not fixed (step 6).
 - `reviewer` stays on its frontmatter's `high`: it runs on every issue, up to three rounds, so its effort multiplies where usage is highest, and the grading by promises and the later rounds act as its safety net. Raise it only on evidence of a blocker in scope of `docs/design.md` §14 that a review approved (#104).
-- Never use effort `max` or the `fable` model unless the maintainer asks. Only `architect` runs on effort `xhigh`, in the calls above; the main session runs on `xhigh` only when the maintainer sets it by hand with `/effort`, for a session dedicated to planning or triage.
+- Never use effort `max` or the `fable` model unless the maintainer asks. Of the agents, only `architect` runs on effort `xhigh`, in the calls above; the main session runs on `xhigh` only when the maintainer sets it by hand with `/effort`, for a session dedicated to planning or triage.
 
 ## Subagent prompts
 
