@@ -24,10 +24,12 @@ One issue per session. A new session knows nothing about the previous one; every
 
 ## Model routing and effort
 
-- The main session runs on `opus`, effort `high` (`.claude/settings.json`): it holds the judgment calls (triage, routing, follow-up issues, settling review minors). Each agent's model and effort are in its own frontmatter.
-- A spike or `complexity: high` issue goes to `architect`, then to `implementer` called with model `opus` and effort `high`, whatever the main session runs on.
-- A bug that survived one fix goes to `architect`. In a review, that is a blocker a re-review reports as not fixed (step 6).
-- Never use effort `max` or the `fable` model unless the maintainer asks. Effort `xhigh` is set only by the maintainer, by hand with `/effort`, for a session dedicated to planning or triage.
+- The main session runs on `opus`, effort `high` (`.claude/settings.json`): it holds the judgment calls (triage, routing, follow-up issues, settling review minors). Each agent's model and effort are in its own frontmatter; the calls below override them.
+- `architect` is called with effort `xhigh` when it decides: a spike, the plan of a `complexity: high` issue, and a bug that survived one fix. Each of these guides the runs after it, so a wrong decision costs several `implementer` runs and review rounds. Its other work (applying a decision already made to the docs, drafting issues, an analysis for the maintainer) runs on its frontmatter's `high` (#104).
+- A spike or `complexity: high` issue goes to `architect` (effort `xhigh`), then to `implementer` called with model `opus` and effort `high`, whatever the main session runs on.
+- A bug that survived one fix goes to `architect` (effort `xhigh`). In a review, that is a blocker a re-review reports as not fixed (step 6).
+- `reviewer` stays on its frontmatter's `high`: it runs on every issue, up to three rounds, so its effort multiplies where usage is highest, and the grading by promises and the later rounds act as its safety net. Raise it only on evidence of a blocker in scope of `docs/design.md` §14 that a review approved (#104).
+- Never use effort `max` or the `fable` model unless the maintainer asks. Only `architect` runs on effort `xhigh`, in the calls above; the main session runs on `xhigh` only when the maintainer sets it by hand with `/effort`, for a session dedicated to planning or triage.
 
 ## Subagent prompts
 
@@ -55,7 +57,7 @@ When the maintainer says "continue":
    Fix any `WARNING` it prints first (for example, enable the hooks).
 2. **Check the routing rule** in "Model routing and effort" above; step 4 applies it.
 3. **Start:** `node scripts/loop.mjs start N` (label + board). Update `main` (`git switch main && git pull --ff-only`) and create `<type>/<issue>-short-description`. When resuming, switch to the existing branch instead.
-4. **Route the work:** spike → `architect`; `complexity: high` → `architect` plans, then `implementer` on `opus`/`high`, phase by phase; test infrastructure and other code → `implementer` (model and effort from its frontmatter). The main session costs more per token, so it edits inline only small changes: wording in docs or rules files, issue text, and the fix of a review finding (blocker or minor) of a few lines.
+4. **Route the work:** spike → `architect` on `xhigh`; `complexity: high` → `architect` on `xhigh` plans, then `implementer` on `opus`/`high`, phase by phase; test infrastructure and other code → `implementer` (model and effort from its frontmatter). The main session costs more per token, so it edits inline only small changes: wording in docs or rules files, issue text, and the fix of a review finding (blocker or minor) of a few lines.
 5. **Verify** with `pnpm check` (lint, format check, typecheck, test, build, the size of `docs/design.md`; `docs/design.md` §3) and every acceptance criterion.
 6. **`reviewer`** reviews the branch (round 1). It grades every finding `blocker` or `minor` by promises and the threat model (`docs/design.md` §14): a blocker is code that breaks a promise or a contract of `docs/design.md` or `docs/format-spec.md`, or a hard rule, under a condition in scope of §14, or a change to what users or agents see that the docs do not record. Code that differs from a description of mechanism is not a blocker: the fix is to remove the description. **Every finding is settled, never dropped:**
    - **Blockers** are fixed in the branch. A fix of behavior starts with a test that fails without it, and every fix also covers the same mistake elsewhere in the branch. `implementer` fixes them (on `opus`/`high` for `complexity: high`); in every case the main session fixes inline only a small change (step 4).
