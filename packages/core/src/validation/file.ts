@@ -1,4 +1,4 @@
-import type { FormatRegistry, LibraryFileKind } from "../format.js";
+import { type FileKind, type FormatRegistry, layoutKindOf } from "../format.js";
 import { escapePointerToken, readLibraryJson } from "../json/read.js";
 import { type Issue, makeIssue } from "./issue.js";
 import { escapeControl, parseValue } from "./zod-issues.js";
@@ -32,7 +32,7 @@ export function versionOf(value: unknown): number | null {
 /** Checks one library file. `path` is relative to the library, with `/`. */
 export function checkLibraryFile(
   registry: FormatRegistry,
-  kind: LibraryFileKind,
+  kind: FileKind,
   path: string,
   bytes: Uint8Array,
 ): FileCheck {
@@ -63,7 +63,31 @@ export function checkLibraryFile(
     registry.versions[registry.current];
   if (spec === undefined) throw new Error(`The registry has no version ${registry.current}.`);
 
-  const parsed = parseValue(spec.schemas[kind], read.value, path);
+  // A path that the file's own version's layout does not have: it belongs to another version
+  // (format-spec §15.2), so its version is wrong for where it sits and nothing else of it can be
+  // checked. The path decides, not the kind: a kind that two versions keep at different paths is
+  // checked only where its own version puts it.
+  if (layoutKindOf(spec.layout, path) !== kind) {
+    return {
+      status: "invalid",
+      formatVersion,
+      value: null,
+      issues: [
+        makeIssue(
+          "schema-violation",
+          path,
+          "/formatVersion",
+          formatVersion === null
+            ? "formatVersion: must be a format version that has a file at this path."
+            : `formatVersion: format version ${formatVersion} has no file at this path.`,
+        ),
+      ],
+    };
+  }
+  const schema = Object.hasOwn(spec.schemas, kind) ? spec.schemas[kind] : undefined;
+  if (schema === undefined)
+    throw new Error(`The registry's layout names "${kind}" but has no schema for it.`);
+  const parsed = parseValue(schema, read.value, path);
   const issues = parsed.issues;
 
   const identity = spec.layout.identityOf(path, kind);

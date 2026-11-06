@@ -7,8 +7,43 @@ import { fnv1a32, makeStablePng, withTempDir } from "@tastelib/testkit";
  * Test-only: it lives outside `src/`, so it can never reach `dist/`.
  */
 
+/** The golden library folder of format version `version`: JSON only, hand-written, frozen. */
+export function goldenDir(version: number): string {
+  return join(import.meta.dirname, "..", "golden", `v${version}`);
+}
+
 /** The golden v1 library folder: JSON only, hand-written, frozen. */
-export const GOLDEN_V1 = join(import.meta.dirname, "..", "golden", "v1");
+export const GOLDEN_V1 = goldenDir(1);
+
+const compareText = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+
+/**
+ * Every file under `library` as relative path (with `/`) to its exact bytes, sorted by path in
+ * code-unit order, so the result never depends on the order the file system lists names in.
+ */
+export async function readTree(library: string): Promise<Map<string, Uint8Array>> {
+  const files: [string, Uint8Array][] = [];
+  const walk = async (relative: string): Promise<void> => {
+    const segments = relative === "" ? [] : relative.split("/");
+    for (const entry of await readdir(join(library, ...segments), { withFileTypes: true })) {
+      const path = relative === "" ? entry.name : `${relative}/${entry.name}`;
+      if (entry.isDirectory()) await walk(path);
+      else files.push([path, new Uint8Array(await readFile(join(library, ...path.split("/"))))]);
+    }
+  };
+  await walk("");
+  return new Map(files.sort(([a], [b]) => compareText(a, b)));
+}
+
+/** Every file under `library` as relative path to its parsed JSON, sorted by path. */
+export async function readValues(library: string): Promise<Map<string, unknown>> {
+  const decoder = new TextDecoder();
+  const values = new Map<string, unknown>();
+  for (const [path, bytes] of await readTree(library)) {
+    values.set(path, JSON.parse(decoder.decode(bytes)));
+  }
+  return values;
+}
 
 interface ListedFile {
   file: string;

@@ -1,27 +1,30 @@
-import { lstat, stat } from "node:fs/promises";
+import { stat } from "node:fs/promises";
+import { hostname } from "node:os";
 import { join } from "node:path";
 import type { Plan, Skipped } from "../changes/plan.js";
 import {
-  classifyEntry,
   currentLayout,
-  type FormatLayout,
+  currentSpec,
+  type FileKind,
   type FormatRegistry,
-  type LibraryFileKind,
+  kindOfPath,
 } from "../format.js";
-import { canonicalize, serialize } from "../json/canonical.js";
 import { differsBesidesUpdatedAt, stampFile } from "../model/timestamps.js";
-import { Slug } from "../schemas/v1/shared.js";
 import { type CrossFile, crossFileIssues, type LinkEvent } from "../validation/cross.js";
 import { checkLibraryFile, type FileCheck } from "../validation/file.js";
 import { type Issue, makeIssue } from "../validation/issue.js";
 import type { Snapshot } from "../validation/library.js";
 import { sortIssues } from "../validation/report.js";
+import { type Migrated, type PendingCleanup, resumeCleanup, runMigration } from "./migrate.js";
+import { BACKUP, backupPresent } from "./migration-backup.js";
 import type { OpenFailure, SnapshotResult } from "./open.js";
 import type { Written } from "./refresh.js";
 import {
   checkFile,
   type Expected,
+  type FileSystem,
   type IoFailure,
+  realFileSystem,
   removeFile,
   replaceFile,
   type WriteOptions,
@@ -37,7 +40,10 @@ import {
  * written and not written.
  */
 
-/** Something that happened beyond the plan; the migration runner (#38) adds the `migrated` notice. */
+/**
+ * Something that happened beyond the plan: `migrated` when the gate migrated the library on disk
+ * and reached the manifest marked `done` (docs/design.md section 3, "A write result").
+ */
 export type Notice = { code: "migrated"; from: number; to: number };
 
 /** A failure that is not a validation issue (docs/design.md section 3). */
@@ -60,14 +66,20 @@ export type WriteResult =
     } & Common);
 
 /**
- * The options of `library.write`: those of the replace primitive, without what the pipeline sets
- * for each file. Besides the replace primitive's own points, `at` is called by the pipeline with
- * `checked` once every target is checked and before the first rename, then with `wrote:<path>` or
- * `deleted:<path>` after each file that was written or deleted.
+ * The options of `library.write` and `library.migrate`: those of the replace primitive, without
+ * what the pipeline sets for each file; `fs` also serves the gate's look for the migration backup
+ * (its `lstat`) and the migration runner. Besides the replace primitive's own points, `at` is
+ * called by the migration runner when the gate migrates (its points are documented with
+ * `RunnerOptions` in `migrate.ts`), then by the pipeline with `checked` once every target is
+ * checked and before the first rename, then with `wrote:<path>` or `deleted:<path>` after each file
+ * that was written or deleted.
  */
 export interface LibraryWriteOptions
   extends Omit<WriteOptions, "expected" | "root" | "file" | "conflictCheck"> {
-  /** The time of the write; tests fix time and skew. Default: the system clock. */
+  /**
+   * The time of the write, and of the claim when the gate migrates; tests fix time and skew.
+   * Default: the system clock.
+   */
   clock?: () => Date;
 }
 
@@ -85,44 +97,32 @@ export interface WriteContext {
    * (`null` for a deletion), so the next refresh reads it back once and compares the bytes.
    */
   wrote?: (path: string, written: Written) => void;
+  /** The host name a migration writes to `owner.json`. Default: `os.hostname()`. */
+  hostName?: string;
+  /** The process id a migration writes to `owner.json`. Default: `process.pid`. */
+  pid?: number;
+  /**
+   * The handle's memory of a migration of its own whose cleanup failed too (docs/design.md section
+   * 4, "Migration runner failures"): the gate resumes it before the next write. Without it, a
+   * failed cleanup is not resumed.
+   */
+  cleanup?: { pending: PendingCleanup | null };
 }
 
-const BACKUP = ".tastelib/migration-backup";
+/**
+ * What `library.migrate` gives (docs/design.md section 4, "`tastelib migrate`"): the gate ran with
+ * no plan, and the library was `current` (nothing written) or `migrated`, or the gate stopped it
+ * (`refused` or `failed`). `notices` holds `migrated` exactly as a write result does.
+ */
+export type MigrateResult =
+  | { status: "current"; notices: Notice[] }
+  | ({ notices: Notice[] } & Migrated)
+  | { status: "refused"; issues: Issue[]; notices: Notice[] }
+  | { status: "failed"; failure: WriteFailure; notices: Notice[] };
 
 function errnoOf(error: unknown): string | undefined {
   const code = (error as { code?: unknown } | null)?.code;
   return typeof code === "string" && !code.startsWith("ERR_") ? code : undefined;
-}
-
-/**
- * Whether `.tastelib/migration-backup/` exists, looked at now and never cached (format-spec
- * §15.3). An error with an errno other than "not there" is thrown as it is.
- */
-async function backupPresent(root: string): Promise<boolean> {
-  try {
-    await lstat(join(root, ".tastelib", "migration-backup"));
-    return true;
-  } catch (error) {
-    const errno = errnoOf(error);
-    if (errno === "ENOENT" || errno === "ENOTDIR") return false;
-    throw error;
-  }
-}
-
-/** The type of the file at `path`, or `null` when the format has no such file. */
-export function kindOfPath(layout: FormatLayout, path: string): LibraryFileKind | null {
-  const segments = path.split("/");
-  let parent = "";
-  for (const [index, name] of segments.entries()) {
-    const last = index === segments.length - 1;
-    const entry = classifyEntry(layout, parent, name, !last);
-    if (last) return entry.type === "file" ? entry.kind : null;
-    if (entry.type !== "folder") return null;
-    // A folder inside a thing folder is named for a thing (`projects/<slug>/`): never `..` or a path trick.
-    if (index >= 1 && !Slug.safeParse(name).success) return null;
-    parent = parent === "" ? name : `${parent}/${name}`;
-  }
-  return null;
 }
 
 /** What a write that ends with a refusal or a failure reports about the disk and the plan. */
@@ -148,51 +148,127 @@ function failed(failure: WriteFailure, stopped: Stopped = nothing): WriteResult 
 
 const isError = (issue: Issue): boolean => issue.severity === "error";
 
-function ioFailure(operation: string, file: string, error: unknown, errno: string): WriteResult {
-  const message = error instanceof Error ? error.message : String(error);
-  return failed({ code: "io-error", operation, file, errno, message });
-}
+/** What the gate gives: a result that ends the write, or the snapshot to plan on and its notices. */
+type Gated =
+  | { stop: WriteResult }
+  | { snapshot: Snapshot; notices: Notice[]; migration: Migrated | null };
 
-/** The gate (docs/design.md section 4, "Write gate"): a result that ends the write, or `null`. */
-async function gate(context: WriteContext, snapshot: Snapshot): Promise<WriteResult | null> {
-  // 2. The migration backup. Until recovery is built (#39), every write gets `write-conflict`.
+const withNotices = (result: WriteResult, notices: Notice[]): WriteResult => ({
+  ...result,
+  notices,
+});
+
+/**
+ * The gate (docs/design.md section 4, "Write gate"), after the refresh: the migration backup,
+ * `library.json`, newer files, and an older or mixed library, which it migrates on disk.
+ */
+async function gate(
+  context: WriteContext,
+  refreshed: Snapshot,
+  options: LibraryWriteOptions,
+): Promise<Gated> {
+  const fs: FileSystem = options.fs ?? realFileSystem;
+  let snapshot = refreshed;
+  // 2. The migration backup. First, a cleanup of this handle's own migration that failed is
+  //    finished, as the owner, if `owner.json` still holds its bytes; it changes library files, so
+  //    the snapshot is refreshed again.
+  const memory = context.cleanup;
+  if (memory?.pending != null) {
+    const resumed = await resumeCleanup(context, memory.pending, options);
+    if (resumed.status === "refused") return { stop: refused(resumed.issues) };
+    if (resumed.status === "failed") return { stop: failed(resumed.failure) };
+    memory.pending = null;
+    if (resumed.status === "done") {
+      const fresh = await context.snapshot();
+      if (!fresh.ok) return { stop: failed({ code: fresh.code, message: fresh.message }) };
+      snapshot = fresh.snapshot;
+    }
+  }
+  //    Then the backup itself. Until recovery is built (#39), every write gets `write-conflict`.
   try {
-    if (await backupPresent(context.root)) {
-      return refused([
-        makeIssue(
-          "write-conflict",
-          BACKUP,
-          null,
-          "A migration backup exists, so a migration is running or was interrupted; nothing was written. Try again later, or see `tastelib doctor`.",
-        ),
-      ]);
+    if (await backupPresent(context.root, fs.lstat)) {
+      return {
+        stop: refused([
+          makeIssue(
+            "write-conflict",
+            BACKUP,
+            null,
+            "A migration backup exists, so a migration is running or was interrupted; nothing was written. Try again later, or see `tastelib doctor`.",
+          ),
+        ]),
+      };
     }
   } catch (error) {
     const errno = errnoOf(error);
     if (errno === undefined) throw error;
-    return ioFailure("lstat", BACKUP, error, errno);
+    return {
+      stop: failed({
+        code: "io-error",
+        operation: "lstat",
+        file: BACKUP,
+        errno,
+        message: `The migration backup folder cannot be looked for (${errno}).`,
+      }),
+    };
   }
   // 3. `library.json` that cannot be read leaves the library's version unknown.
   const library = snapshot.files.get("library.json");
   if (library !== undefined && (library.status === "invalid" || library.status === "unreadable")) {
-    return refused([...library.issues]);
+    return { stop: refused([...library.issues]) };
   }
   // 4. and 5. answered by the version summary of the index, without another read.
   const versions = snapshot.index.versions;
   // 4. A file of a newer format anywhere: one issue per file.
   if (versions.newer.length > 0) {
-    return refused(versions.newer.flatMap((path) => [...(snapshot.files.get(path)?.issues ?? [])]));
-  }
-  // 5. An older or mixed library is migrated first, which arrives with the migration runner
-  //    (#38). Until then it is refused, so a write never mixes versions.
-  if (versions.needsMigration || versions.mixedFiles.length > 0) {
-    return refused(
-      snapshot.issues.filter(
-        (issue) => issue.code === "needs-migration" || issue.code === "mixed-format-versions",
+    return {
+      stop: refused(
+        versions.newer.flatMap((path) => [...(snapshot.files.get(path)?.issues ?? [])]),
       ),
-    );
+    };
   }
-  return null;
+  // 5. An older or mixed library is migrated on disk first, then the snapshot is refreshed.
+  if (!versions.needsMigration && versions.mixedFiles.length === 0) {
+    return { snapshot, notices: [], migration: null };
+  }
+  const run = await runMigration(
+    {
+      root: context.root,
+      registry: context.registry,
+      sha256: context.sha256,
+      hostName: context.hostName ?? hostname(),
+      pid: context.pid ?? process.pid,
+      wrote: context.wrote,
+    },
+    snapshot,
+    options,
+  );
+  switch (run.status) {
+    case "current":
+      return { snapshot, notices: [], migration: null };
+    case "blocked":
+      return { stop: refused([...run.issues]) };
+    case "refused":
+      if (run.pending !== null && memory !== undefined) memory.pending = run.pending;
+      return { stop: withNotices(refused(run.issues), run.notice === null ? [] : [run.notice]) };
+    case "failed": {
+      if (run.pending !== null && memory !== undefined) memory.pending = run.pending;
+      const notices = run.notice === null ? [] : [run.notice];
+      if (run.notice === null && run.failure.errno === "ENOENT") {
+        // The library folder or its `library.json` went away (docs/design.md section 4, "Durability").
+        const gone = await vanished(context.root);
+        if (gone !== null) return { stop: failed(gone) };
+      }
+      return { stop: withNotices(failed(run.failure), notices) };
+    }
+    case "migrated": {
+      const notices: Notice[] = [{ code: "migrated", from: run.from, to: run.to }];
+      const fresh = await context.snapshot();
+      if (!fresh.ok) {
+        return { stop: withNotices(failed({ code: fresh.code, message: fresh.message }), notices) };
+      }
+      return { snapshot: fresh.snapshot, notices, migration: run };
+    }
+  }
 }
 
 /** The files of a snapshot as the cross-file checks take them. */
@@ -231,7 +307,7 @@ function linksOf(
 /** A change after validation: the canonical new value, or `null` for a deletion. */
 interface Prepared {
   path: string;
-  kind: LibraryFileKind;
+  kind: FileKind;
   value: unknown;
   /** The bytes the snapshot read, or `"absent"` for a new file. */
   expected: Expected;
@@ -354,7 +430,7 @@ const encoder = new TextEncoder();
 /** One file ready for the disk: its final bytes and their check, or `null` for a deletion. */
 interface Ready {
   path: string;
-  kind: LibraryFileKind;
+  kind: FileKind;
   bytes: Uint8Array | null;
   check: FileCheck | null;
   expected: Expected;
@@ -384,11 +460,52 @@ export async function runWrite(
   // 1. Refresh the snapshot, then the gate.
   const opened = await context.snapshot();
   if (!opened.ok) return failed({ code: opened.code, message: opened.message });
-  const snapshot = opened.snapshot;
+  const gated = await gate(context, opened.snapshot, options);
+  if ("stop" in gated) return gated.stop;
+  const result = await writePlan(context, gated.snapshot, build, options);
+  // A notice of the gate stays in the result whatever happened to the plan (docs/design.md section 3).
+  return gated.notices.length === 0 ? result : withNotices(result, gated.notices);
+}
 
-  const stopped = await gate(context, snapshot);
-  if (stopped !== null) return stopped;
+/**
+ * `library.migrate` (docs/design.md section 4, "`tastelib migrate`"): the write gate with no plan.
+ * It refreshes, checks the migration backup, `library.json` and newer files, and migrates an older
+ * or mixed library on disk; a current library is left as it is, with nothing written.
+ */
+export async function runMigrate(
+  context: WriteContext,
+  options: LibraryWriteOptions = {},
+): Promise<MigrateResult> {
+  const opened = await context.snapshot();
+  if (!opened.ok) {
+    return {
+      status: "failed",
+      failure: { code: opened.code, message: opened.message },
+      notices: [],
+    };
+  }
+  const gated = await gate(context, opened.snapshot, options);
+  if ("stop" in gated) {
+    const stop = gated.stop;
+    if (stop.status === "refused") {
+      return { status: "refused", issues: stop.issues, notices: stop.notices };
+    }
+    if (stop.status === "failed") {
+      return { status: "failed", failure: stop.failure, notices: stop.notices };
+    }
+    throw new Error(`The gate stopped with ${stop.status}.`);
+  }
+  if (gated.migration === null) return { status: "current", notices: gated.notices };
+  return { ...gated.migration, notices: gated.notices };
+}
 
+/** Layers 2 to 9 of the pipeline, on the gated snapshot. */
+async function writePlan(
+  context: WriteContext,
+  snapshot: Snapshot,
+  build: Build,
+  options: LibraryWriteOptions,
+): Promise<WriteResult> {
   // 2. Plan, and the files it may not touch.
   const plan = await build(snapshot);
   const skipped = plan.skipped;
@@ -399,14 +516,15 @@ export async function runWrite(
 
   // 4. Validate every new value: the schema and every rule within the file.
   const layout = currentLayout(registry);
+  const spec = currentSpec(registry);
   const problems: Issue[] = [];
   const prepared: Prepared[] = [];
   for (const change of plan.changes) {
     const path = change.path;
-    const kind = kindOfPath(layout, path) as LibraryFileKind;
+    const kind = kindOfPath(layout, path) as FileKind;
     const existing = snapshot.files.get(path);
     const expected: Expected = existing?.bytes ?? "absent";
-    const previous = existing === undefined ? null : canonicalize(kind, existing.value);
+    const previous = existing === undefined ? null : spec.canonicalize(kind, existing.value);
     if (change.next === null) {
       prepared.push({ path, kind, value: null, expected, previous });
       continue;
@@ -427,7 +545,7 @@ export async function runWrite(
     }
     problems.push(...errors);
     if (checked.status !== "valid" || errors.length > 0) continue;
-    const value = canonicalize(kind, checked.value);
+    const value = spec.canonicalize(kind, checked.value);
     // A change that changes nothing is dropped, so a file that is merely not canonical is not rewritten.
     if (previous !== null && !differsBesidesUpdatedAt(previous, value)) continue;
     prepared.push({ path, kind, value, expected, previous });
@@ -443,7 +561,7 @@ export async function runWrite(
   const now = (options.clock?.() ?? new Date()).toISOString();
   const ready: Ready[] = prepared.map(({ path, kind, value, expected, previous }) => {
     if (value === null) return { path, kind, bytes: null, check: null, expected };
-    const bytes = encoder.encode(serialize(kind, stampFile(kind, previous, value, now)));
+    const bytes = encoder.encode(spec.serialize(kind, stampFile(kind, previous, value, now)));
     const final = checkLibraryFile(registry, kind, path, bytes);
     if (final.status !== "valid" || final.issues.length > 0) {
       throw new Error(
@@ -463,7 +581,7 @@ export async function runWrite(
     expected: file.expected,
     root: context.root,
     file: file.path,
-    conflictCheck: () => backupPresent(context.root),
+    conflictCheck: () => backupPresent(context.root, (options.fs ?? realFileSystem).lstat),
   });
   const targetOf = (path: string) => join(context.root, ...path.split("/"));
   /** The result for a stop at `index`: the files before it were written, the rest were not. */

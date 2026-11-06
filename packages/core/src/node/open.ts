@@ -4,7 +4,15 @@ import { FORMAT_REGISTRY, type FormatRegistry } from "../format.js";
 import type { Snapshot } from "../validation/library.js";
 import { readLibraryFileBytes } from "./read-file.js";
 import { createRefresher, type StatFn } from "./refresh.js";
-import { type Build, type LibraryWriteOptions, runWrite, type WriteResult } from "./write.js";
+import {
+  type Build,
+  type LibraryWriteOptions,
+  type MigrateResult,
+  runMigrate,
+  runWrite,
+  type WriteContext,
+  type WriteResult,
+} from "./write.js";
 
 /**
  * Opening a library and keeping it fresh (docs/design.md section 3, "Core modules and API";
@@ -25,6 +33,13 @@ export interface OpenOptions {
   statClock?: () => number;
   /** Replaces the reading of a library file (tests count reads). */
   readFile?: typeof readLibraryFileBytes;
+  /** The host name a migration writes to its `owner.json`; tests inject it. Default: `os.hostname()`. */
+  hostName?: string;
+  /**
+   * The process id a migration writes to its `owner.json`; tests inject it. An integer from 1 to
+   * 2^31 - 1. Default: `process.pid`.
+   */
+  pid?: number;
 }
 
 /** Failures that are not validation issues (docs/design.md section 3): the command line turns them into exit 2. */
@@ -49,6 +64,12 @@ export interface Library {
    * handle run one at a time, in order; across processes the optimistic check decides.
    */
   write(build: Build, options?: LibraryWriteOptions): Promise<WriteResult>;
+  /**
+   * Migrates an older or mixed library on disk (docs/design.md section 4, "`tastelib migrate`"):
+   * the write gate with no plan. A current library is left as it is, with nothing written. It
+   * runs in turn with the handle's writes.
+   */
+  migrate(options?: LibraryWriteOptions): Promise<MigrateResult>;
 }
 
 export type OpenResult = { ok: true; library: Library } | OpenFailure;
@@ -75,22 +96,31 @@ export async function openLibrary(root: string, options: OpenOptions = {}): Prom
   const first = await refresher.request();
   if (!first.ok) return first;
   const snapshot = (): Promise<SnapshotResult> => refresher.request();
+  const context: WriteContext = {
+    root,
+    registry,
+    sha256,
+    snapshot,
+    wrote: refresher.wrote,
+    hostName: options.hostName,
+    pid: options.pid,
+    // The handle remembers a failed cleanup of its own migration, with the bytes of its
+    // `owner.json`, and finishes it before its next write (docs/design.md section 4).
+    cleanup: { pending: null },
+  };
   let queue: Promise<unknown> = Promise.resolve();
+  /** Runs `task` after every write or migration queued before it, one at a time. */
+  const inTurn = <T>(task: () => Promise<T>): Promise<T> => {
+    const run = queue.then(task);
+    queue = run.catch(() => undefined);
+    return run;
+  };
   return {
     ok: true,
     library: {
       snapshot,
-      write(build, writeOptions) {
-        const run = queue.then(() =>
-          runWrite(
-            { root, registry, sha256, snapshot, wrote: refresher.wrote },
-            build,
-            writeOptions,
-          ),
-        );
-        queue = run.catch(() => undefined);
-        return run;
-      },
+      write: (build, writeOptions) => inTurn(() => runWrite(context, build, writeOptions)),
+      migrate: (migrateOptions) => inTurn(() => runMigrate(context, migrateOptions)),
     },
   };
 }

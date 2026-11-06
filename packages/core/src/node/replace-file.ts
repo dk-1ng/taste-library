@@ -12,10 +12,14 @@ import { randomPart, type RandomSource } from "../ids/random.js";
  * tests' `SimulatedCrash`) propagates with nothing cleaned up, like a process that dies there.
  */
 
-/** The subset of `node:fs/promises` the primitive needs; tests wrap it to inject failures. */
+/**
+ * The subset of `node:fs/promises` the primitive, the write pipeline and the migration runner
+ * need; tests wrap it to inject failures. `lstat` is the write gate's look for the migration
+ * backup.
+ */
 export type FileSystem = Pick<
   typeof fsPromises,
-  "open" | "rename" | "unlink" | "mkdir" | "rmdir" | "stat"
+  "open" | "rename" | "unlink" | "mkdir" | "rmdir" | "stat" | "lstat"
 >;
 
 export const realFileSystem: FileSystem = fsPromises;

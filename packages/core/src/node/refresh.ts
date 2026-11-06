@@ -1,7 +1,7 @@
 import type { BigIntStats } from "node:fs";
 import type { readdir } from "node:fs/promises";
 import { join } from "node:path";
-import type { FormatRegistry, LibraryFileKind } from "../format.js";
+import type { FormatRegistry, FileKind } from "../format.js";
 import type { FileCheck } from "../validation/file.js";
 import { type Issue, makeIssue } from "../validation/issue.js";
 import {
@@ -42,7 +42,7 @@ export interface RefreshOptions {
 }
 
 /** What a write gives layer 9: the bytes it wrote with their check, or `null` for a deletion. */
-export type Written = { kind: LibraryFileKind; bytes: Uint8Array; check: FileCheck } | null;
+export type Written = { kind: FileKind; bytes: Uint8Array; check: FileCheck } | null;
 
 export interface Refresher {
   /**

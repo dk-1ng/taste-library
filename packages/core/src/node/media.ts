@@ -312,7 +312,9 @@ export async function checkMedia(
   const marker = await checkMarker(mediaFolder, snapshot, registry);
   if (!marker.proceed) return marker.issues;
 
-  const { listed, unknownRefs } = listedMedia(snapshot);
+  // An older library lists its media as the migration would leave its references (docs/design.md
+  // section 3, the migrated view).
+  const { listed, unknownRefs } = listedMedia(snapshot.migrated ?? snapshot);
   // If references/ could not be listed, which files are listed is unknown: nothing is an orphan.
   const referencesUnlisted = snapshot.issues.some(
     (issue) => issue.code === "unreadable-file" && issue.file === "references",

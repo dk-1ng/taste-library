@@ -1,5 +1,5 @@
 import type { z } from "zod";
-import type { LibraryFileKind } from "../format.js";
+import type { FileKind, LibraryFileKind } from "../format.js";
 import type { FileValue } from "../json/canonical.js";
 import { DirectionId, GuardrailId, PinId, RefId, Slug } from "../schemas/v1/shared.js";
 import type { Snapshot } from "../validation/library.js";
@@ -66,14 +66,18 @@ function removeLinks(
 ): { changes: FileChange[]; skipped: Skipped[] } {
   const changes: FileChange[] = [];
   const skipped: Skipped[] = [];
+  // A kind of another format version is never one of the version 1 holders.
+  const isHolder = (kind: FileKind): kind is LibraryFileKind =>
+    (holders as readonly FileKind[]).includes(kind);
   for (const [path, file] of snapshot.files) {
-    if (!holders.includes(file.kind)) continue;
+    const kind = file.kind;
+    if (!isHolder(kind)) continue;
     const reason = skipReasonOf(file.status);
     if (reason !== null) {
       skipped.push({ path, reason });
       continue;
     }
-    const next = remove(file.kind, file.value);
+    const next = remove(kind, file.value);
     if (next !== null) changes.push({ path, next });
   }
   const folders = holders.flatMap((kind) => FOLDER_OF[kind] ?? []);

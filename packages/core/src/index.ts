@@ -9,11 +9,17 @@
  * - `schemas/v<N>/` (pure): the frozen zod schemas of format version N (format-spec §15.4):
  *   `shared.ts` for §4 of the spec, one module per file type, and `set.ts`, the schema set.
  * - `format.ts` (pure): `CURRENT_FORMAT_VERSION` and the format registry, with each version's
- *   schema set and folder layout (which relative paths are which file type).
+ *   file kinds (schema set and folder layout: which relative paths are which kind), its canonical
+ *   form, and the steps between versions, applied in memory by `applySteps`.
+ * - `migrations/` (pure): the migration steps, one module per step (`v<N>-to-v<N+1>.ts`), the
+ *   production step table (`steps.ts`, empty at version 1) (format-spec §15.4), and the planner
+ *   (`plan.ts`: steps 1 to 3 of format-spec §15.3 in memory, for the runner, the dry run and the
+ *   snapshot's migrated view).
  * - `marker.ts` (pure): the media marker's own registry and steps (format-spec §15.1).
  * - `validation/` (pure): the `Issue` type and the codes with their severities, the mapping
  *   from zod issues to issues with pointers and English messages, the checks within one file,
- *   the checks across files, the snapshot and the report of format-spec §16.3.
+ *   the checks across files, one view of a library (`view.ts`), the snapshot with its migrated
+ *   view and the report of format-spec §16.3.
  * - `ids/` (pure): random identifiers, sequential numbers, slugs.
  * - `model/` (pure): derived values: the effective value, the derived state, region rounding
  *   and the timestamps a write sets.
@@ -23,8 +29,10 @@
  *   link that does not resolve is judged by the write pipeline in `node/write.ts`.
  * - `node/` (Node): everything that touches the operating system: listing and reading files,
  *   fingerprints, opening and refreshing a library, the atomic replace, the write pipeline and
- *   gate, media checks, attaching a media folder and the media write guard (`media-folder.ts`,
- *   `folders.ts` for folder identity and the Git walk) and the per-machine config.
+ *   gate, the migration runner and dry run (`migrate.ts`) and the migration backup's paths and
+ *   files (`migration-backup.ts`), media checks, attaching a media folder and the
+ *   media write guard (`media-folder.ts`, `folders.ts` for folder identity and the Git walk) and
+ *   the per-machine config.
  *
  * A folder is pure unless it is under `node/`; the lint rule in the root `biome.json` enforces it.
  */
@@ -57,6 +65,7 @@ export {
   readMarker,
 } from "./node/media-folder.js";
 export { mediaPathSegments, type ResolvedMedia, resolveMediaPath } from "./node/media-path.js";
+export { type DryRunOptions, type DryRunResult, dryRunMigration } from "./node/migrate.js";
 export type {
   Library as OpenLibrary,
   OpenFailure,
@@ -79,11 +88,11 @@ export {
   type WriteOptions,
   type WriteOutcome,
 } from "./node/replace-file.js";
-export {
-  type Build,
-  kindOfPath,
-  type LibraryWriteOptions,
-  type Notice,
-  type WriteFailure,
-  type WriteResult,
+export type {
+  Build,
+  LibraryWriteOptions,
+  MigrateResult,
+  Notice,
+  WriteFailure,
+  WriteResult,
 } from "./node/write.js";

@@ -1,4 +1,4 @@
-import type { LibraryFileKind } from "../format.js";
+import type { FileKind } from "../format.js";
 import type { FileValue } from "../json/canonical.js";
 import {
   buildTargets,
@@ -18,13 +18,14 @@ import { describePath, pointerOf } from "./zod-issues.js";
  * §14, §13.3, §13.4, §15.2). Pure: the parsed files in, issues out. SHA-256 is passed in as a
  * synchronous function, because the browser's `digest` is asynchronous (docs/design.md section 3).
  *
- * Only a file that is `valid` and at the current version takes part with its value. Migrating
- * older files in memory arrives with the migration runner (#38); until then an older file is
- * neither checked for links nor a place where a link can be found, so its links are unresolved.
+ * Only a file that is `valid` and at the current version takes part with its value: an older or
+ * mixed library is checked on its migrated view (`validation/library.ts`), and when it has none
+ * (the migration cannot run) an older file is neither checked for links nor a place where a link
+ * can be found, so its links are unresolved.
  */
 
 export interface CrossFile {
-  kind: LibraryFileKind;
+  kind: FileKind;
   status: FileStatus;
   formatVersion: number | null;
   /** The parsed value; present when the status is `valid`. */

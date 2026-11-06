@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
+import { TEST_REGISTRY } from "../../test/support/registry.js";
 import { goldenSnapshot } from "../../test/support/snapshot.js";
 import { FORMAT_REGISTRY } from "../format.js";
+import { planMigration } from "../migrations/plan.js";
 import { makeIssue } from "./issue.js";
 import {
   assembleSnapshot,
@@ -86,5 +88,53 @@ describe("checkEntry and assembleSnapshot", () => {
     });
     expect(snapshot.index.references.get("ref-20261103-g7h8j9")?.state).toBe("reviewed");
     expect(snapshot.index.backlinks.get("family:quiet-editorial")?.length).toBe(1);
+  });
+});
+
+describe('the migrated view (docs/design.md section 3, "Core modules and API")', () => {
+  // biome-ignore lint/suspicious/noExplicitAny: tests edit arbitrary JSON
+  type Json = any;
+  const older = (edit?: (files: Map<string, unknown>) => void) =>
+    goldenSnapshot(edit, { registry: TEST_REGISTRY });
+
+  it("is null for a current library, and the planner's migrated library for an older one", () => {
+    expect(goldenSnapshot().migrated).toBeNull();
+    const snapshot = older();
+    const plan = planMigration(TEST_REGISTRY, snapshot, sha256);
+    if (plan.status !== "ready" || snapshot.migrated === null) throw new Error("no migrated view");
+    expect(data(snapshot.migrated)).toEqual(data(plan.migrated));
+  });
+
+  it("puts in the report the issues of the files on disk once, the version issues, and the issues across files of the migrated library at their migrated paths", () => {
+    const family = "families/dense-dashboards.json";
+    const snapshot = older((files) => {
+      // A file already at version 2, not canonical: the migration keeps it as it is, so the
+      // migrated library has its warning too, which the report holds once.
+      const value = files.get(family) as Json;
+      files.set(family, JSON.stringify({ ...value, formatVersion: 2 }));
+      (files.get("families/quiet-editorial.json") as Json).members[1].target =
+        "ref-20261101-a1b2c3#p9";
+    });
+    expect(snapshot.migrated).not.toBeNull();
+    expect(snapshot.issues.map((i) => [i.severity, i.code, i.file, i.pointer])).toEqual([
+      ["info", "needs-migration", null, null],
+      ["warning", "not-canonical", family, null],
+      ["warning", "mixed-format-versions", family, "/formatVersion"],
+      ["warning", "dangling-link", "families/quiet-editorial.json", "/members/1/target"],
+    ]);
+    const [, notCanonical, , dangling] = snapshot.issues;
+    expect(notCanonical?.message).not.toMatch(/after migration/);
+    expect(dangling?.message).toMatch(/\(found after migration to version 2\)\.$/);
+  });
+
+  it("gives the index from the migrated library, with the version summary of the files on disk", () => {
+    const snapshot = older();
+    const migrated = snapshot.migrated;
+    if (migrated === null) throw new Error("no migrated view");
+    expect(snapshot.index.references).toBe(migrated.index.references);
+    expect(snapshot.index.familiesOf).toBe(migrated.index.familiesOf);
+    expect(snapshot.index.backlinks).toBe(migrated.index.backlinks);
+    expect(snapshot.index.versions).toMatchObject({ library: 1, needsMigration: true });
+    expect(migrated.index.versions).toMatchObject({ library: 2, needsMigration: false });
   });
 });

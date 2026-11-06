@@ -6,10 +6,9 @@ import { editJson, GOLDEN_V1, withGoldenCopy } from "../../test/support/golden.j
 import { TEST_REGISTRY } from "../../test/support/registry.js";
 import { expectMatchesRebuild } from "../../test/support/rebuild.js";
 import { FORMAT_REGISTRY } from "../browser.js";
-import { currentLayout } from "../format.js";
+import { currentLayout, kindOfPath } from "../format.js";
 import { type Library, openLibrary } from "./open.js";
 import type { LibraryWriteOptions, WriteResult } from "./write.js";
-import { kindOfPath } from "./write.js";
 
 // biome-ignore lint/suspicious/noExplicitAny: tests read and edit arbitrary JSON
 type Json = any;
@@ -444,33 +443,27 @@ describe("the write gate", () => {
     });
   });
 
-  it("refuses an older library until the migration runner exists", async () => {
+  it("migrates a mixed library first and writes the change at the current version", async () => {
     await withGoldenCopy(async (dir) => {
-      const before = await tree(dir);
+      await editJson(dir, "library.json", (value) => {
+        value.formatVersion = 2;
+      });
       const library = await open(dir, TEST_REGISTRY);
-      const result = await library.write(() => ({ changes: [], skipped: [] }), { clock });
-      expect(result.status).toBe("refused");
-      if (result.status === "refused") {
-        expect(result.issues.map((i) => i.code)).toContain("needs-migration");
-      }
-      expect(await tree(dir)).toEqual(before);
-    });
-  });
-
-  it("refuses a mixed library until the migration runner exists", async () => {
-    await withGoldenCopy(async (dir) => {
-      await writeFile(
-        join(dir, "library.json"),
-        `${JSON.stringify({ formatVersion: 2, anything: true }, null, 2)}\n`,
+      const result = await edit(library, "guardrails.json", (file) => {
+        file.guardrails[0].rule.content.text = "No banners that compete with the content.";
+      });
+      expect(result).toEqual({
+        status: "written",
+        written: ["guardrails.json"],
+        skipped: [],
+        notices: [{ code: "migrated", from: 1, to: 2 }],
+      });
+      const guardrails = await json(dir, "guardrails.json");
+      expect(guardrails.formatVersion).toBe(2);
+      expect(guardrails.guardrails[0].rule.content.text).toBe(
+        "No banners that compete with the content.",
       );
-      const before = await tree(dir);
-      const library = await open(dir, TEST_REGISTRY);
-      const result = await edit(library, "glossary.json", () => undefined);
-      expect(result.status).toBe("refused");
-      if (result.status === "refused") {
-        expect(result.issues.map((i) => i.code)).toContain("mixed-format-versions");
-      }
-      expect(await tree(dir)).toEqual(before);
+      expect(await readdir(dir)).not.toContain("glossary.json");
     });
   });
 
@@ -640,11 +633,16 @@ describe("refusals", () => {
 
   it("refuses a valid value of an older format version when the tool writes a newer one", async () => {
     await withTempDir(async (dir) => {
-      await writeFile(join(dir, "library.json"), `${JSON.stringify({ formatVersion: 2 })}\n`);
+      const golden = await json(GOLDEN_V1, "library.json");
+      await writeFile(
+        join(dir, "library.json"),
+        `${JSON.stringify({ ...golden, formatVersion: 2 }, null, 2)}\n`,
+      );
       const library = await open(dir, TEST_REGISTRY);
       const result = await library.write(
         () => ({
-          changes: [{ path: "glossary.json", next: { formatVersion: 1, terms: [] } }],
+          // A valid version 1 file, of a kind version 2 still has.
+          changes: [{ path: "guardrails.json", next: { formatVersion: 1, guardrails: [] } }],
           skipped: [],
         }),
         { clock },
