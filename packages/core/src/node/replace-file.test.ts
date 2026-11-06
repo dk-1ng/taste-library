@@ -37,6 +37,7 @@ function faulty(
     mkdir: guard("mkdir", realFileSystem.mkdir) as FileSystem["mkdir"],
     rmdir: realFileSystem.rmdir,
     stat: realFileSystem.stat as FileSystem["stat"],
+    lstat: realFileSystem.lstat as FileSystem["lstat"],
   };
 }
 

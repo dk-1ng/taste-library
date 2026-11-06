@@ -11,8 +11,8 @@ import type { VersionSummary } from "./versions.js";
  * the same parsed files, so an updated index is always a fresh rebuild.
  *
  * Per-file data (kind, fingerprint, `formatVersion`, status) lives in the snapshot's `files`; the
- * index does not copy it. Only references valid at the current version are indexed until the
- * migration runner (#38) gives older files a value at the current version.
+ * index does not copy it. Only references valid at the current version are indexed: an older or
+ * mixed library is indexed from its migrated view (`validation/library.ts`).
  */
 
 export interface IndexedReference {

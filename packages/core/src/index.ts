@@ -29,7 +29,8 @@
  *   link that does not resolve is judged by the write pipeline in `node/write.ts`.
  * - `node/` (Node): everything that touches the operating system: listing and reading files,
  *   fingerprints, opening and refreshing a library, the atomic replace, the write pipeline and
- *   gate, the migration dry run (`migrate.ts`), media checks, attaching a media folder and the
+ *   gate, the migration runner and dry run (`migrate.ts`) and the migration backup's paths and
+ *   files (`migration-backup.ts`), media checks, attaching a media folder and the
  *   media write guard (`media-folder.ts`, `folders.ts` for folder identity and the Git walk) and
  *   the per-machine config.
  *
@@ -90,6 +91,7 @@ export {
 export type {
   Build,
   LibraryWriteOptions,
+  MigrateResult,
   Notice,
   WriteFailure,
   WriteResult,

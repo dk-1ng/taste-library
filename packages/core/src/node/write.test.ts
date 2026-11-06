@@ -443,34 +443,27 @@ describe("the write gate", () => {
     });
   });
 
-  it("refuses an older library until the migration runner exists", async () => {
-    await withGoldenCopy(async (dir) => {
-      const before = await tree(dir);
-      const library = await open(dir, TEST_REGISTRY);
-      const result = await library.write(() => ({ changes: [], skipped: [] }), { clock });
-      expect(result.status).toBe("refused");
-      if (result.status === "refused") {
-        expect(result.issues.map((i) => i.code)).toContain("needs-migration");
-      }
-      expect(await tree(dir)).toEqual(before);
-    });
-  });
-
-  it("refuses a mixed library until the migration runner exists", async () => {
+  it("migrates a mixed library first and writes the change at the current version", async () => {
     await withGoldenCopy(async (dir) => {
       await editJson(dir, "library.json", (value) => {
         value.formatVersion = 2;
       });
-      const before = await tree(dir);
       const library = await open(dir, TEST_REGISTRY);
       const result = await edit(library, "guardrails.json", (file) => {
         file.guardrails[0].rule.content.text = "No banners that compete with the content.";
       });
-      expect(result.status).toBe("refused");
-      if (result.status === "refused") {
-        expect(result.issues.map((i) => i.code)).toContain("mixed-format-versions");
-      }
-      expect(await tree(dir)).toEqual(before);
+      expect(result).toEqual({
+        status: "written",
+        written: ["guardrails.json"],
+        skipped: [],
+        notices: [{ code: "migrated", from: 1, to: 2 }],
+      });
+      const guardrails = await json(dir, "guardrails.json");
+      expect(guardrails.formatVersion).toBe(2);
+      expect(guardrails.guardrails[0].rule.content.text).toBe(
+        "No banners that compete with the content.",
+      );
+      expect(await readdir(dir)).not.toContain("glossary.json");
     });
   });
 

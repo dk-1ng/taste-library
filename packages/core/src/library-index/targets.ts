@@ -7,9 +7,9 @@ import type { CrossFile } from "../validation/cross.js";
  * "Links to files with errors"; format-spec §14). Pure. The cross-file checks and the index both
  * resolve links here, so the dangling check and the existence sets can never disagree.
  *
- * Only a file that is `valid` and at the current version is usable. Migrating older files in
- * memory arrives with the migration runner (#38); until then a link into an older file is
- * unresolved.
+ * Only a file that is `valid` and at the current version is usable: an older or mixed library is
+ * resolved on its migrated view (`validation/library.ts`), and without one a link into an older
+ * file is unresolved.
  */
 
 export type LinkTarget =
