@@ -15,7 +15,7 @@
   },
   "scripts": {
     "build": "tsc -b",
-    "test": "vitest run"
+    "test": "tsc -b && vitest run"
   },
   "dependencies": {
     "zod": "4.6.7"
