@@ -58,7 +58,7 @@ Scopes:
 | `ci` | GitHub Actions |
 | `deps` | dependency updates |
 | `docs` | general documentation |
-| `repo` | workflow files: `CLAUDE.md`, templates, agents, hooks |
+| `repo` | workflow files: `CLAUDE.md`, templates, agents, skills, hooks |
 
 **Attribution trailer.** Every commit except merge commits ends with a blank line and an `Assisted-by:` trailer naming the AI tool used (in this project, `Assisted-by: Claude Code`), or `Assisted-by: none` if no AI tool was used. CI checks it on every pull request; Dependabot pull requests are exempt. Do not use `Co-Authored-By` for an AI, and do not add "Generated with ..." lines (CI refuses them in every commit).
 
