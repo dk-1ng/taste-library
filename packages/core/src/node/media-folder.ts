@@ -1,4 +1,4 @@
-import { mkdir, readdir, rmdir, stat } from "node:fs/promises";
+import { lstat, mkdir, readdir, rmdir, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { readLibraryJson } from "../json/read.js";
 import { MARKER_REGISTRY, type MarkerRegistry, migrateMarker, serializeMarker } from "../marker.js";
@@ -44,7 +44,8 @@ const MARKER_TEMP = /^\.tastelib-media\.json\.tmp-[0-9a-hjkmnp-tv-z]{8}$/;
 
 /** Whether a folder's entry is one of those that do not make the folder "not empty". */
 export function isIgnorableEntry(name: string): boolean {
-  return IGNORABLE.has(name.normalize("NFC").toLowerCase()) || MARKER_TEMP.test(name);
+  const folded = name.normalize("NFC").toLowerCase();
+  return IGNORABLE.has(folded) || MARKER_TEMP.test(folded);
 }
 
 export type AttachRefusalCode =
@@ -80,7 +81,12 @@ export type AttachResult =
       marker: "written" | "kept" | "migrated";
       notices: { code: "media-already-attached" }[];
     }
-  | { status: "refused"; code: AttachRefusalCode; message: string; issues: Issue[] }
+  | {
+      status: "refused";
+      code: AttachRefusalCode | "write-conflict";
+      message: string;
+      issues: Issue[];
+    }
   | { status: "failed"; failure: IoFailure };
 
 function ioFailure(operation: string, file: string, error: unknown): IoFailure {
@@ -151,19 +157,16 @@ async function migrateOnDisk(
   const outcome = await replaceFile(
     join(folder, MARKER_FILE),
     new TextEncoder().encode(serializeMarker(registry, state.value)),
-    { ...options, expected: state.bytes, file: MARKER_FILE },
+    { ...options, expected: state.bytes, file: MARKER_REPORT_FILE },
   );
   if (outcome.status === "done") return null;
   return outcome.status === "write-conflict" ? "conflict" : outcome.failure;
 }
 
-const conflictFailure = (file: string): IoFailure => ({
-  code: "io-error",
-  operation: "write",
-  file,
-  errno: "write-conflict",
-  message: "the marker changed while it was being written",
-});
+const CONFLICT_MESSAGE =
+  "The marker changed while it was being written, so nothing was replaced. Read it again and retry.";
+const conflictIssue = (): Issue =>
+  makeIssue("write-conflict", MARKER_REPORT_FILE, null, CONFLICT_MESSAGE);
 
 /**
  * Attaches `path` as the media folder of `library`: runs the checks in the order of docs/design.md
@@ -177,13 +180,13 @@ export async function attachMediaFolder(
   const registry = options.markerRegistry ?? MARKER_REGISTRY;
   const platform = options.platform ?? process.platform;
   const refuse = (
-    code: AttachRefusalCode,
+    code: AttachRefusalCode | "write-conflict",
     message: string,
     issues: Issue[] = [],
   ): AttachResult => ({ status: "refused", code, message, issues });
   const failed = (operation: string, error: unknown): AttachResult => ({
     status: "failed",
-    failure: ioFailure(operation, path, error),
+    failure: ioFailure(operation, "media:", error),
   });
 
   // 1. Not a folder.
@@ -198,6 +201,19 @@ export async function attachMediaFolder(
     }
   } catch (error) {
     const errno = (error as { code?: unknown } | null)?.code;
+    if (
+      errno === "ENOENT" &&
+      (await lstat(path).then(
+        () => true,
+        () => false,
+      ))
+    ) {
+      // A link whose target is not there (for example a drive that is not mounted).
+      return refuse(
+        "not-a-folder",
+        `${path} is a link to a folder that does not exist. Choose or create an empty folder for media.`,
+      );
+    }
     if (errno === "ENOENT") exists = false;
     else if (errno === "ENOTDIR") {
       return refuse(
@@ -324,12 +340,9 @@ export async function attachMediaFolder(
       };
     }
     const migrated = await migrateOnDisk(path, state, registry, options.write);
-    if (migrated !== null) {
-      return {
-        status: "failed",
-        failure: migrated === "conflict" ? conflictFailure(MARKER_FILE) : migrated,
-      };
-    }
+    if (migrated === "conflict")
+      return refuse("write-conflict", CONFLICT_MESSAGE, [conflictIssue()]);
+    if (migrated !== null) return { status: "failed", failure: migrated };
     marker = "migrated";
     return {
       status: "attached",
@@ -355,14 +368,12 @@ export async function attachMediaFolder(
   const outcome = await replaceFile(join(path, MARKER_FILE), new TextEncoder().encode(fresh), {
     ...options.write,
     expected: "absent",
-    file: MARKER_FILE,
+    file: MARKER_REPORT_FILE,
   });
   if (outcome.status !== "done") {
     if (created) await rmdir(path).catch(() => undefined);
-    return {
-      status: "failed",
-      failure: outcome.status === "failed" ? outcome.failure : conflictFailure(MARKER_FILE),
-    };
+    if (outcome.status === "failed") return { status: "failed", failure: outcome.failure };
+    return refuse("write-conflict", CONFLICT_MESSAGE, [conflictIssue()]);
   }
   return { status: "attached", folder: path, marker: "written", notices: [] };
 }
@@ -375,7 +386,8 @@ export type MediaGuardResult =
         | "media-marker-missing"
         | "media-marker-unreadable"
         | "media-folder-mismatch"
-        | "newer-format";
+        | "newer-format"
+        | "write-conflict";
       issues: Issue[];
     }
   | { status: "failed"; failure: IoFailure };
@@ -426,10 +438,10 @@ export async function guardMediaWrite(
       if (state.version === registry.current) return { status: "ok", marker: "kept" };
       const migrated = await migrateOnDisk(mediaFolder, state, registry, options.write);
       if (migrated === null) return { status: "ok", marker: "migrated" };
-      return {
-        status: "failed",
-        failure: migrated === "conflict" ? conflictFailure(MARKER_FILE) : migrated,
-      };
+      if (migrated === "conflict") {
+        return { status: "refused", code: "write-conflict", issues: [conflictIssue()] };
+      }
+      return { status: "failed", failure: migrated };
     }
   }
 }

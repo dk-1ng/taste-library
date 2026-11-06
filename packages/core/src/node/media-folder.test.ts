@@ -4,6 +4,8 @@ import { withTempDir } from "@tastelib/testkit";
 import { describe, expect, it } from "vitest";
 import { withGoldenCopy } from "../../test/support/golden.js";
 import { TEST_MARKER_REGISTRY } from "../../test/support/marker-registry.js";
+import { reportOf } from "../browser.js";
+import { FORMAT_REGISTRY } from "../format.js";
 import { serialize } from "../json/canonical.js";
 import { MARKER_REGISTRY, serializeMarker } from "../marker.js";
 import { findGitWorkTree } from "./folders.js";
@@ -92,11 +94,12 @@ describe("attachMediaFolder", () => {
     await withLibrary(async (library, base) => {
       const media = join(base, "mídia");
       await mkdir(media);
-      for (const name of [".DS_Store", "THUMBS.DB", "Desktop.INI", ".stfolder", "Icon\r"]) {
-        await writeFile(join(media, name), "x");
-      }
+      // Windows file names cannot hold control characters, so "Icon\r" is tested on its own below.
+      const names = [".DS_Store", "THUMBS.DB", "Desktop.INI", ".stfolder"];
+      if (process.platform !== "win32") names.push("Icon\r");
+      for (const name of names) await writeFile(join(media, name), "x");
       await mkdir(join(media, "$recycle.bin"));
-      await writeFile(join(media, ".tastelib-media.json.tmp-0a1b2c3d"), "x");
+      await writeFile(join(media, ".TASTELIB-MEDIA.JSON.TMP-0A1B2C3D"), "x");
       const result = await attachMediaFolder(library, media);
       expect(result.status).toBe("attached");
       expect(await readdir(media)).toContain(MARKER_FILE);
@@ -169,10 +172,12 @@ describe("attachMediaFolder", () => {
     await withLibrary(async (library, base) => {
       const before = await listing(base);
       expect(refusal(await attachMediaFolder(library, base))).toBe("library-inside-media");
-      const link = join(base, "..", "outro");
-      await symlink(base, link, "junction");
-      expect(refusal(await attachMediaFolder(library, link))).toBe("library-inside-media");
-      await rm(link, { recursive: true, force: true });
+      await withTempDir(async (other) => {
+        const link = join(other, "atalho");
+        await symlink(base, link, "junction");
+        expect(refusal(await attachMediaFolder(library, link))).toBe("library-inside-media");
+        await rm(link, { recursive: true, force: true });
+      });
       expect(await listing(base)).toEqual(before);
     });
   });
@@ -207,6 +212,15 @@ describe("attachMediaFolder", () => {
       await writeFile(file, "x");
       expect(refusal(await attachMediaFolder(library, file))).toBe("not-a-folder");
       expect(refusal(await attachMediaFolder(library, join(file, "sub")))).toBe("not-a-folder");
+    });
+  });
+
+  it("refuses a link to a folder that does not exist, writing nothing", async () => {
+    await withLibrary(async (library, base) => {
+      const link = join(base, "unidade");
+      await symlink(join(base, "desmontada"), link, "junction");
+      expect(refusal(await attachMediaFolder(library, link))).toBe("not-a-folder");
+      expect(await readdir(base)).toEqual(["biblioteca", "unidade"]);
     });
   });
 
@@ -338,6 +352,9 @@ describe("isIgnorableEntry", () => {
     expect(isIgnorableEntry(".dropbox.attr")).toBe(true);
     expect(isIgnorableEntry(".dropbox.other")).toBe(false);
     expect(isIgnorableEntry(".git")).toBe(false);
+    expect(isIgnorableEntry("Icon\r")).toBe(true);
+    expect(isIgnorableEntry("icon")).toBe(false);
+    expect(isIgnorableEntry(".TASTELIB-MEDIA.JSON.TMP-0A1B2C3D")).toBe(true);
   });
 });
 
@@ -422,6 +439,99 @@ describe("findGitWorkTree", () => {
         status: "found",
       });
       expect(await findGitWorkTree(base)).toEqual({ status: "none" });
+    });
+  });
+});
+
+describe("a lost race on the marker", () => {
+  /** Rewrites the marker with different bytes each time, just before the rename. */
+  const racing = (folder: string, id = ID) => {
+    let count = 0;
+    return {
+      at: async (point: string) => {
+        if (point !== "before-rename") return;
+        count += 1;
+        const text = serialize("marker", { formatVersion: 1, libraryId: id });
+        await writeFile(join(folder, MARKER_FILE), `${text}${" ".repeat(count)}`);
+      },
+    };
+  };
+
+  it("is a write-conflict refusal when a new marker is being written", async () => {
+    await withLibrary(async (library, base) => {
+      const media = join(base, "mídia");
+      await mkdir(media);
+      const result = await attachMediaFolder(library, media, {
+        write: racing(media, OTHER),
+      });
+      expect(refusal(result)).toBe("write-conflict");
+      expect(await readFile(join(media, MARKER_FILE), "utf8")).toContain(OTHER);
+    });
+  });
+
+  it("is a write-conflict refusal for the guard's and the attach's migration too", async () => {
+    await withLibrary(async (library, base) => {
+      const media = join(base, "mídia");
+      await attachMediaFolder(library, media);
+      const write = racing(media);
+      const guard = await guardMediaWrite(media, ID, {
+        markerRegistry: TEST_MARKER_REGISTRY,
+        write,
+      });
+      expect(guard).toMatchObject({ status: "refused", code: "write-conflict" });
+      const again = await attachMediaFolder(library, media, {
+        markerRegistry: TEST_MARKER_REGISTRY,
+        write,
+      });
+      expect(refusal(again)).toBe("write-conflict");
+    });
+  });
+});
+
+describe("the marker and the library", () => {
+  it("a newer marker blocks the media guard, the library stays writable, and the marker never counts for mixed-format-versions", async () => {
+    await withGoldenCopy(async (library, base) => {
+      const id = (
+        JSON.parse(await readFile(join(library, "library.json"), "utf8")) as { id: string }
+      ).id;
+      const media = join(base, "mídia");
+      await attachMediaFolder({ path: library, id }, media, {
+        markerRegistry: TEST_MARKER_REGISTRY,
+      });
+      await writeFile(join(media, MARKER_FILE), `{"formatVersion":3,"libraryId":"${id}"}`);
+      const marker = await readFile(join(media, MARKER_FILE));
+      expect(
+        await guardMediaWrite(media, id, { markerRegistry: TEST_MARKER_REGISTRY }),
+      ).toMatchObject({
+        status: "refused",
+        code: "newer-format",
+      });
+      expect(await readFile(join(media, MARKER_FILE))).toEqual(marker);
+
+      const opened = await openLibrary(library);
+      if (!opened.ok) throw new Error(opened.message);
+      const result = await opened.library.write(
+        (snapshot) => {
+          const next = structuredClone(snapshot.files.get("library.json")?.value) as {
+            name: string;
+          };
+          next.name = "Novo nome";
+          return { changes: [{ path: "library.json", next }], skipped: [] };
+        },
+        { clock: () => new Date("2026-11-05T10:00:00.000Z") },
+      );
+      expect(result.status).toBe("written");
+
+      // An older marker (version 1 beside a version 2 tool) is not a mixed-version library either.
+      await writeFile(
+        join(media, MARKER_FILE),
+        serialize("marker", { formatVersion: 1, libraryId: id }),
+      );
+      const snapshot = await opened.library.snapshot();
+      if (!snapshot.ok) throw new Error(snapshot.message);
+      const issues = await checkMedia(snapshot.snapshot, media, {});
+      const report = reportOf(FORMAT_REGISTRY, snapshot.snapshot, issues);
+      expect(report.issues.map((issue) => issue.code)).not.toContain("mixed-format-versions");
     });
   });
 });
