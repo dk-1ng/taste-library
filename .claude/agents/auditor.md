@@ -44,7 +44,7 @@ Propose the destination; the main session creates the issues.
 
 ## Output
 
-First line: `CLEAN` when there is no blocker (minors may remain), otherwise `BLOCKERS FOUND`.
+First line: `CLEAN` when there is no blocker (minors may remain), otherwise `BLOCKERS FOUND`. Second line: `Base <sha> · audited <sha>`, the full commits of the range you audited.
 
 Then the findings, blockers first, most severe first within each group: an id (`A1`, `A2`, ...) · `[blocker|minor]` (plus `needs design decision` when it applies) · the check (promise, journey or backlog) · `file:line` or the issue · what is wrong · the failure scenario, with the test or probe that reproduces it · the fix you suggest.
 
