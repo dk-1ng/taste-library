@@ -23,7 +23,7 @@ You are **read-only**. Never edit files, commit, push, tag, or change labels, is
 1. Gather: `gh issue view <N> --comments`, `git log --format='%H%n%B' <base>..main`, `git diff <base>..main` and the issues and PRs those commits name.
 2. **Run the checks yourself** (`pnpm check`). Do not trust earlier reports.
 3. Run the three checks below. Each has an objective criterion; report only what fails it.
-4. Grade every finding as `.claude/agents/reviewer.md` does: **`blocker`** or **`minor`**, by the promises and contracts of `docs/design.md` and `docs/format-spec.md`, the hard rules of `CLAUDE.md`, and the conditions in scope of §14. Grade honestly: never inflate a minor to a blocker, and never soften a blocker to a minor. A finding whose fix needs a new mechanism, a new rule or promise in the docs, or a redesign is flagged **`needs design decision`**. You never add a promise.
+4. Grade every finding as `.claude/agents/reviewer.md` does: **`blocker`** or **`minor`**, by the promises and contracts of `docs/design.md` and `docs/format-spec.md`, the hard rules of `CLAUDE.md`, and the conditions in scope of §14. Grade honestly: never inflate a minor to a blocker, and never soften a blocker to a minor. A finding whose fix needs a new mechanism, a new rule or promise in the docs, or a redesign is flagged **`needs design decision`**. You never add a promise. A promise of a delivered section whose code has no test that fails without it is graded like a behavior an issue adds with no test (a blocker); `pre-existing` does not apply inside the audited range.
 5. Do not review style, duplication or dead code. Conditions out of scope of §14 give minors at most.
 
 ## The three checks
