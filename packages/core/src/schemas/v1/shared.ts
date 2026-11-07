@@ -414,7 +414,38 @@ export function authored<T extends z.ZodType>(
         checkReview(ctx, value, REVIEW_STATUS);
       }),
     );
-  return z.discriminatedUnion("origin", [user, agent]);
+  return byOrigin(
+    [user, agent],
+    z.strictObject({
+      origin: z.unknown(),
+      content: content.optional(),
+      writtenAt: Timestamp.optional(),
+      proposedBy: AgentLabel.optional(),
+      proposedAt: Timestamp.optional(),
+      inputSha256: inputSha256.optional(),
+      proposal: content.optional(),
+      status: z.enum(REVIEW_STATUS).optional(),
+      correction: content.nullable().optional(),
+      reviewedAt: Timestamp.nullable().optional(),
+    }),
+  );
+}
+
+/**
+ * The two forms of a value by its `origin`. While `origin` is missing or unknown the union
+ * reports only that, and the form says which fields are required, so the other fields that are
+ * present are still checked by their types with `either`: every field of both forms, optional,
+ * and the fields of neither form unknown. The rules across fields wait for a valid `origin`.
+ */
+function byOrigin<U extends z.ZodObject, A extends z.ZodObject>(forms: [U, A], either: z.ZodType) {
+  return z.discriminatedUnion("origin", forms).check(
+    crossCheck((raw, ctx) => {
+      if (!isObject(raw) || raw.origin === "user" || raw.origin === "agent") return;
+      const result = either.safeParse(raw, { reportInput: true });
+      if (result.success) return;
+      for (const issue of result.error.issues) ctx.addIssue(issue as never);
+    }),
+  );
 }
 
 /** `ReviewedLink<K>`. */
@@ -434,7 +465,18 @@ export function reviewedLink<K extends z.ZodType>(target: K) {
       reviewedAt: Timestamp.nullable(),
     })
     .check(crossCheck((value, ctx) => checkReview(ctx, objectOf(value), LINK_STATUS)));
-  return z.discriminatedUnion("origin", [user, agent]);
+  return byOrigin(
+    [user, agent],
+    z.strictObject({
+      origin: z.unknown(),
+      target: target.optional(),
+      addedAt: Timestamp.optional(),
+      proposedBy: AgentLabel.optional(),
+      proposedAt: Timestamp.optional(),
+      status: z.enum(LINK_STATUS).optional(),
+      reviewedAt: Timestamp.nullable().optional(),
+    }),
+  );
 }
 
 /** `reviewedAt` is `null` if and only if the status is `to-review`, and not earlier than `proposedAt`. */

@@ -21,8 +21,6 @@ import type { ReadOk } from "./read.js";
  * an invalid value throws (a bug in the caller), it is never silently fixed.
  */
 
-type Loose = Record<string, unknown>;
-
 /** Code-unit order: the same on every computer, unlike `localeCompare`. */
 function compareText(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
@@ -49,13 +47,13 @@ function targetOrder(a: { target: string }, b: { target: string }): number {
   return compareText(refA, refB) || sequenceNumber(pieceA) - sequenceNumber(pieceB);
 }
 
-/** The key order of a frame, which the media schema reads as `unknown` and so cannot order. */
+/** The key order of a frame, which the media schema reads as it comes and so does not order. */
 const FRAME_KEYS = ["timeMs", "file", "type", "bytes", "sha256", "width", "height"] as const;
 
 function canonicalReference(value: z.infer<typeof ReferenceSchema>): unknown {
   const media = sortedBy(value.media, byIdNumber).map((item) => ({
     ...item,
-    frames: sortedBy(item.frames as Loose[], (frame) => frame.timeMs as number).map((frame) =>
+    frames: sortedBy(item.frames, (frame) => frame.timeMs).map((frame) =>
       Object.fromEntries(FRAME_KEYS.map((key) => [key, frame[key]])),
     ),
   }));

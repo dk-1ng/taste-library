@@ -362,6 +362,47 @@ describe("Authored", () => {
     expect(problems(schema(), { ...user, origin: "robot" })).toEqual(["schema-violation /origin"]);
     expect(problems(schema(), {})).toEqual(["schema-violation /origin"]);
   });
+  it("checks the fields of both forms by their type when the origin is missing or unknown", () => {
+    const { origin: _o, ...noOrigin } = withAgent({
+      writtenAt: "x",
+      proposedAt: "y",
+      proposedBy: "Bad Label",
+      status: "nope",
+      inputSha256: SHA,
+      proposal: "",
+      content: "",
+      correction: "",
+      reviewedAt: "z",
+      extra: 1,
+    });
+    const expected = [
+      "schema-violation /content",
+      "schema-violation /correction",
+      "schema-violation /extra",
+      "schema-violation /inputSha256",
+      "schema-violation /origin",
+      "schema-violation /proposal",
+      "schema-violation /proposedAt",
+      "schema-violation /proposedBy",
+      "schema-violation /reviewedAt",
+      "schema-violation /status",
+      "schema-violation /writtenAt",
+    ];
+    expect(problems(schema(), noOrigin).sort()).toEqual(expected);
+    expect(problems(schema(), { ...noOrigin, origin: "robot" }).sort()).toEqual(expected);
+  });
+  it("does not ask for the fields of a form while the origin is invalid, nor run its cross rules", () => {
+    expect(problems(schema(), { origin: "robot", content: "hi" })).toEqual([
+      "schema-violation /origin",
+    ]);
+    // status "corrected" with a null correction and a reviewedAt on to-review are cross rules.
+    expect(
+      problems(schema(), { ...agent, origin: "robot", status: "corrected", correction: null }),
+    ).toEqual(["schema-violation /origin"]);
+    expect(problems(schema(), { ...agent, origin: "robot", reviewedAt: T0 })).toEqual([
+      "schema-violation /origin",
+    ]);
+  });
   it("keeps non-ASCII content", () => {
     ok(schema(), { ...user, content: "ação 日本" });
   });
@@ -383,6 +424,32 @@ describe("ReviewedLink", () => {
     ok(schema, agent);
     ok(schema, { ...agent, status: "accepted", reviewedAt: T0 });
     ok(schema, { ...agent, status: "rejected", reviewedAt: T0 });
+  });
+  it("checks the fields of both forms by their type when the origin is unknown", () => {
+    const value = {
+      target: "nope",
+      origin: "robot",
+      addedAt: "x",
+      proposedBy: "Bad Label",
+      proposedAt: "y",
+      status: "corrected",
+      reviewedAt: "z",
+      extra: 1,
+    };
+    expect(problems(schema, value).sort()).toEqual([
+      "schema-violation /addedAt",
+      "schema-violation /extra",
+      "schema-violation /origin",
+      "schema-violation /proposedAt",
+      "schema-violation /proposedBy",
+      "schema-violation /reviewedAt",
+      "schema-violation /status",
+      "schema-violation /target",
+    ]);
+    expect(problems(schema, { origin: "robot" })).toEqual(["schema-violation /origin"]);
+    expect(problems(schema, { ...agent, origin: "robot", status: "accepted" })).toEqual([
+      "schema-violation /origin",
+    ]);
   });
   it("does not check the review of a status the link cannot have", () => {
     expect(problems(schema, { ...agent, status: "corrected", reviewedAt: null })).toEqual([

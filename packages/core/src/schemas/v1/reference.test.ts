@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { issuesFromZod } from "../../validation/zod-issues.js";
-import { ReferenceSchema } from "./reference.js";
+import { type Reference, ReferenceSchema } from "./reference.js";
 
 // biome-ignore lint/suspicious/noExplicitAny: the fixtures are plain JSON that tests mutate by path.
 type Loose = any;
@@ -1354,6 +1354,36 @@ describe("reference: sixth round", () => {
       "/media/0/kind",
       "/media/0/sha256",
     ]);
+  });
+
+  it("an unknown kind does not hide frames that are not a list", () => {
+    for (const frames of ["abc", {}, { length: 3 }]) {
+      const found = broken((r) => {
+        r.media[0].kind = "vidoe";
+        r.media[0].frames = frames;
+      });
+      expect(found.map((f) => `${f.pointer}: ${f.message}`).sort()).toEqual([
+        "/media/0/frames: media[0].frames: must be an array.",
+        '/media/0/kind: media[0].kind: must be one of "image", "page", "video".',
+      ]);
+    }
+    const missing = broken((r) => {
+      r.media[0].kind = "vidoe";
+      delete r.media[0].frames;
+    });
+    expect(missing.map((f) => f.message).sort()).toEqual([
+      "media[0].frames: is required.",
+      'media[0].kind: must be one of "image", "page", "video".',
+    ]);
+    expect(broken((r) => (r.media[0].kind = "vidoe")).map((f) => f.pointer)).toEqual([
+      "/media/0/kind",
+    ]);
+  });
+
+  it("types the frames of a media item as a list of frames", () => {
+    // Fails to typecheck if the inferred type is `unknown`.
+    const timeMs = (item: Reference["media"][number]): number[] => item.frames.map((f) => f.timeMs);
+    expect(timeMs({ ...example().media[0], frames: [{ timeMs: 5 }] })).toEqual([5]);
   });
 
   it("frames of a video are still checked in full, with their paths", () => {

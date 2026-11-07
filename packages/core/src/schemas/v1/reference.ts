@@ -12,21 +12,21 @@ import {
   isPieceId,
   isPinId,
   isRefId,
+  LocalPieceId,
   type Loose,
   listOf,
-  objectOf,
-  LocalPieceId,
   MediaId,
   Note,
+  objectOf,
   PinId,
   RefId,
   Sha256,
-  sequenceNumber,
   Slug,
+  sequenceNumber,
   stringOf,
   TagList,
-  text,
   Timestamp,
+  text,
 } from "./shared.js";
 
 /** The reference file (format-spec §7, version 1). */
@@ -67,9 +67,12 @@ const Frame = z.strictObject({
   height: integer(1, 1000000),
 });
 
+type Frame = z.infer<typeof Frame>;
+
 /**
- * A media item. `frames` is read as it comes and checked by kind in the cross check below: only a
- * video has frames, and an unknown kind must not hide the item's other fields.
+ * A media item. `frames` is typed as a list of frames but read as it comes, and checked by kind in
+ * the cross check below: only a video has frames, and an unknown kind must not hide the item's
+ * other fields.
  */
 const Media = z
   .strictObject({
@@ -82,15 +85,19 @@ const Media = z
     width: integer(1, 1000000),
     height: integer(1, 1000000),
     durationMs: integer(1).nullable(),
-    frames: z.unknown(),
+    frames: z.custom<Frame[]>(),
   })
   .check(
     crossCheck((raw, ctx) => {
       const media = objectOf(raw);
       const kind = stringOf(media.kind);
-      if (kind !== "image" && kind !== "page" && kind !== "video") return;
+      if (kind !== "image" && kind !== "page" && kind !== "video") {
+        // Only the kind says what the frames must hold, but they must be a list in any case.
+        checkFrames(media.frames, "any", ctx);
+        return;
+      }
       const isVideo = kind === "video";
-      checkFrames(media.frames, isVideo, ctx);
+      checkFrames(media.frames, isVideo ? "video" : "other", ctx);
       const type = stringOf(media.type);
       if (type !== undefined && Object.hasOwn(EXTENSION, type)) {
         if (isVideo && !type.startsWith("video/")) {
@@ -139,11 +146,13 @@ const Media = z
 const NoFrames = z.array(z.unknown()).superRefine((frames, ctx) => {
   if (frames.length > 0) addRuleIssue(ctx, [], 'must be empty unless kind is "video".');
 });
+const AnyFrames = z.array(z.unknown());
 const VideoFrames = z.array(Frame).max(1000);
 
 /** Parses the frames by kind and reports what is wrong with them under `frames`. */
-function checkFrames(frames: unknown, isVideo: boolean, ctx: z.RefinementCtx): void {
-  const result = (isVideo ? VideoFrames : NoFrames).safeParse(frames, { reportInput: true });
+function checkFrames(frames: unknown, kind: "video" | "other" | "any", ctx: z.RefinementCtx): void {
+  const schema = kind === "video" ? VideoFrames : kind === "other" ? NoFrames : AnyFrames;
+  const result = schema.safeParse(frames, { reportInput: true });
   if (result.success) return;
   for (const issue of result.error.issues) {
     ctx.addIssue({ ...issue, path: ["frames", ...issue.path] } as never);
