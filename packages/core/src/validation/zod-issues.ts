@@ -150,6 +150,7 @@ export function issuesFromZod(error: z.ZodError, file: string): Issue[] {
       (issue.code === "too_small" || issue.code === "too_big") &&
       wrongType.has(pointerOf(issue.path))
     ) {
+      // Skipped: the type issue of the same value says it.
     } else if (issue.code === "invalid_key") {
       // The path of a key issue is the record; the offending key is the last segment already.
       add("schema-violation", issue.path, genericMessage(issue));
