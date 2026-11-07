@@ -63,6 +63,18 @@ describe("issuesFromZod", () => {
     expect(run(union, { k: "z" })[0]?.message).toBe('k: must be one of "x", "y".');
   });
 
+  it("keeps the bound of a string and drops it only for a value of the wrong type", () => {
+    expect(run(z.string().max(3), "abcd")[0]?.message).toBe(
+      "the file: must be at most 3 characters long.",
+    );
+    expect(run(z.string().min(2), "a")[0]?.message).toBe(
+      "the file: must be at least 2 characters long.",
+    );
+    // A value of the wrong type that happens to have a length: the type issue only.
+    const wrong = run(z.array(z.string()).max(1), { length: 5 });
+    expect(wrong.map((i) => i.message)).toEqual(["the file: must be an array."]);
+  });
+
   it("uses the code a custom issue carries and schema-violation otherwise", () => {
     const schema = z.unknown().superRefine((_value, ctx) => {
       addRuleIssue(ctx, ["a"], "twice.", "duplicate-id");

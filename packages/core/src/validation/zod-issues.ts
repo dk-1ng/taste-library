@@ -59,9 +59,6 @@ const TYPE_NAMES: Record<string, string> = {
   null: "null",
 };
 
-/** What a size bound can be about: a list or a number. A string or a plain object that happens to have a `length` is a wrong type, reported as such. */
-const SIZED = new Set(["array", "number", "int"]);
-
 function quoted(values: readonly unknown[]): string {
   return values.map((value) => JSON.stringify(value)).join(", ");
 }
@@ -90,15 +87,19 @@ function genericMessage(issue: z.core.$ZodIssue): string {
       return "does not match any allowed form.";
     }
     case "too_small": {
-      if (!SIZED.has(issue.origin)) return "";
       const minimum = String(issue.minimum);
+      if (issue.origin === "string") return `must be at least ${minimum} characters long.`;
+      if (issue.origin !== "array" && issue.origin !== "number" && issue.origin !== "int")
+        return issue.message;
       if (issue.origin === "array")
         return `must have at least ${minimum} ${minimum === "1" ? "item" : "items"}.`;
       return issue.inclusive ? `must be at least ${minimum}.` : `must be greater than ${minimum}.`;
     }
     case "too_big": {
-      if (!SIZED.has(issue.origin)) return "";
       const maximum = String(issue.maximum);
+      if (issue.origin === "string") return `must be at most ${maximum} characters long.`;
+      if (issue.origin !== "array" && issue.origin !== "number" && issue.origin !== "int")
+        return issue.message;
       if (issue.origin === "array")
         return `must have at most ${maximum} ${maximum === "1" ? "item" : "items"}.`;
       return issue.inclusive ? `must be at most ${maximum}.` : `must be less than ${maximum}.`;
@@ -132,6 +133,12 @@ export function issuesFromZod(error: z.ZodError, file: string): Issue[] {
     out.push(makeIssue(code, file, pointerOf(path), `${describePath(path)}: ${message}`));
   };
 
+  // A bound on a value of the wrong type (a string or an object with a `length` where a list is
+  // expected) is dropped: the type issue of the same value says it.
+  const wrongType = new Set(
+    error.issues.flatMap((issue) => (issue.code === "invalid_type" ? [pointerOf(issue.path)] : [])),
+  );
+
   for (const issue of error.issues) {
     if (issue.code === "unrecognized_keys") {
       const given = (issue as { params?: { message?: unknown } }).params?.message;
@@ -141,9 +148,8 @@ export function issuesFromZod(error: z.ZodError, file: string): Issue[] {
       add(codeOf(issue), issue.path, issue.message);
     } else if (
       (issue.code === "too_small" || issue.code === "too_big") &&
-      !SIZED.has(issue.origin)
+      wrongType.has(pointerOf(issue.path))
     ) {
-      continue; // the type issue of the same value says it
     } else if (issue.code === "invalid_key") {
       // The path of a key issue is the record; the offending key is the last segment already.
       add("schema-violation", issue.path, genericMessage(issue));

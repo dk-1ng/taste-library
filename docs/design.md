@@ -102,7 +102,7 @@ The graph has no cycles. `agent-kit/` is not a workspace package and arrives in 
 
 ### Reading library files
 
-- **Every rule reports once:** a malformed value is reported by its own rule, and the rules across fields (duplicate ids, local links, kind against type, `updatedAt` against `createdAt`, `lastIssued`) still check the rest. Exception: a list over its maximum stops the rules of the objects above it.
+- **Every rule reports once:** a malformed value is reported by its own rule, and the rules across fields (duplicate ids, local links, kind against type, `updatedAt` against `createdAt`, `lastIssued`) still check the rest. A missing or unknown `origin` or media `kind` leaves the other fields checked by type; the form's required fields wait until it is valid. Exception: a list over its maximum stops the rules of the objects above it.
 - **Links stay inside the library.** Every file the tool reads or writes in a library, and every folder it lists or creates there, is the library's real folder or lies under it once links and junctions are resolved; the library folder itself may be a link.
   - A file that leads outside, or into the library's own `.tastelib/` or `.git/`, is `unreadable-file` and never opened; a format folder that does so cannot be listed (`unreadable-file`, everything under it unresolved). Messages never say where a link leads. `library.json` follows the same rule, also when a command looks for its library. A `.tastelib/` that is a link or junction, wherever it leads, refuses every write with `unreadable-file` at `.tastelib`.
   - Other links that stay inside are followed. A write never follows a link at a file path: it replaces or removes the link.
