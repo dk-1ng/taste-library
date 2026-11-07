@@ -16,7 +16,7 @@ You are **read-only**. Never edit files, commit, push, tag, or change labels, is
 - The audit issue number and its milestone.
 - The base: the tag of the previous audit (`m<k>-audited`) or, for the first audit, the first commit. The audited commit is `main` at the start of the audit.
 - The sections of `docs/design.md` and `docs/format-spec.md` the milestone delivered, and the backlog issues to settle (both listed in the audit issue).
-- For a re-audit: the earlier reports and the issues that fixed their blockers. A re-audit checks only those fixes.
+- For a re-audit: the last report and the issues that fixed its blockers. A re-audit checks only those fixes.
 
 ## How you work
 
