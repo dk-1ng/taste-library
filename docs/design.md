@@ -472,7 +472,7 @@ The library's `language` (in `library.json`) is something else: the language of 
 
 See [SECURITY.md](../SECURITY.md) for the sensitive surfaces. The local server listens on the loopback interface only and rejects cross-origin requests.
 
-**Threat model.** The tool is used by one person, on their own computer, with their own account. This list says which conditions the tool must handle and which it need not. Reviews grade by it and by promises (introduction; `.claude/agents/reviewer.md`): a broken promise, contract or hard rule under a condition in scope is a blocker, as is a change to what users or agents see that the docs do not record; the same problem out of scope is minor. Code that differs from a description of mechanism is not a blocker: the fix is to remove the description.
+**Threat model.** The tool is used by one person, on their own computer, with their own account. This list says which conditions the tool must handle and which it need not. Reviews and audits grade by it and by promises (introduction; `.claude/agents/reviewer.md`): a broken promise, contract or hard rule under a condition in scope is a blocker, as is a change to what users or agents see that the docs do not record; the same problem out of scope is minor.
 
 - **In scope:**
   - **The user's own mistakes:** a hand-edited file with typos, wrong types, duplicate ids or broken links; a hand-resolved Git merge; a file deleted or moved by hand.
@@ -532,12 +532,14 @@ Library and media paths are built only from identifiers. Validation reports neve
 | --- | --- |
 | M0 Foundation | monorepo, code standards, tests, CI on Linux, Windows and macOS, translations, `format-spec.md` v1, per-machine config, portability rules |
 | M1 Core & format | schemas, validated read/write, index, migrations; `tastelib init / validate / doctor / config` (`migrate` with the first format v2 change, §18) |
-| M2 Capture & notes | paste image, URL and video; compression; inbox; notes; positive and negative pins; awaiting sync; ends with a real-use checkpoint |
+| M2 Capture & notes | paste image, URL and video; compression; inbox; notes; positive and negative pins; awaiting sync |
 | M3 Agent kit I | writes through CLI and MCP; plugin with `/taste:process`; review queue |
 | M4 Organization & taste | families, family pages, browsing, glossary, taste profile, comparison |
-| M5 Project spaces | filtered intent, directions, pack export, image prompts, results loop; ends with a real-use checkpoint |
+| M5 Project spaces | filtered intent, directions, pack export, image prompts, results loop |
 | M6 Designed UI | the tool's own interface, designed with its own method |
 | M7 Release | see §16 |
+
+Each milestone ends with an audit (`.claude/agents/auditor.md`), then M2 and M5 with a real-use checkpoint.
 
 ## 18. Decision log
 

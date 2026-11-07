@@ -99,7 +99,7 @@ The code lives in `packages/` (`core`, `server`, `web`, `cli`, `mcp`), one works
 
 When you add a dependency, pnpm records the exact version (no `^` ranges) and the lockfile is committed. Shared development tools go in the root `package.json`; a package declares only what it needs at run time. Scripts in any `package.json` must run unchanged on Linux, Windows and macOS: no shell built-ins such as `rm` or `cp`, and no inline environment variables. `pnpm check` is the gate CI will run (wired in a later M0 issue); see `docs/design.md` §3.
 
-Maintainer workflow helpers live in `scripts/` (plain Node, no dependencies, plus the GitHub CLI): `node scripts/loop.mjs status` shows what the per-issue loop should do next, `plan N M<k> [TYPE]` plans a triaged issue (milestone, `status: ready`, optional type) and `unblock N` lifts `status: blocked` (never on a checkpoint). Their tests run with `pnpm test:scripts`.
+Maintainer workflow helpers live in `scripts/` (plain Node, no dependencies, plus the GitHub CLI): `node scripts/loop.mjs status` shows what the per-issue loop should do next, `plan N M<k> [TYPE]` plans a triaged issue (milestone, `status: ready`, optional type), `unblock N` lifts `status: blocked` (never on a checkpoint) and `pause N` returns an audit in progress to `status: ready`. Their tests run with `pnpm test:scripts`.
 
 ## Code standards
 
@@ -109,13 +109,13 @@ Enforced by `pnpm check`: Biome lint and format, strict TypeScript. In addition:
 
 | Group | Labels |
 | --- | --- |
-| type | `type: feature`, `type: bug`, `type: chore`, `type: docs`, `type: spike`, `type: checkpoint` |
+| type | `type: feature`, `type: bug`, `type: chore`, `type: docs`, `type: spike`, `type: audit`, `type: checkpoint` |
 | area | `area: core`, `area: server`, `area: web`, `area: cli`, `area: mcp`, `area: agent-kit` |
 | platform | `platform: windows`, `platform: linux`, `platform: macos` |
 | status | `status: triage`, `status: ready`, `status: in progress`, `status: blocked` |
 | complexity | `complexity: high` |
 
-`type: checkpoint` issues are pauses where the maintainer tests the tool in real use before work continues.
+`type: audit` issues end each milestone: a read-only check of the merged work against the docs, taken after the milestone's other issues and before its checkpoint. `type: checkpoint` issues are pauses where the maintainer tests the tool in real use before work continues.
 
 ## Security
 

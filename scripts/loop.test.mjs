@@ -7,8 +7,10 @@ import {
   main,
   ownPullRequest,
   parsePlanArgs,
+  pauseChanges,
   pickNext,
   planChanges,
+  TRIAGE_LIMIT,
   unblockChanges,
 } from "./loop.mjs";
 
@@ -108,6 +110,8 @@ test("argument errors exit with 2 before any network call", () => {
       ["plan", "5", "M1", "nonsense"],
       ["unblock", "5", "extra"],
       ["unblock", "abc"],
+      ["pause", "abc"],
+      ["pause", "5", "extra"],
     ];
     for (const argv of bad) {
       assert.equal(main(argv), 2, argv.join(" "));
@@ -252,4 +256,95 @@ test("plan keeps a blocked issue blocked: it does not add ready", () => {
 test("unblock refuses a closed issue", () => {
   const closed = withState(issue(4, "M0 Foundation", "status: blocked"), "CLOSED");
   assert.match(unblockChanges(closed).error, /closed/);
+});
+
+const AUDIT = "type: audit";
+
+test("plan accepts the audit type", () => {
+  assert.equal(parsePlanArgs("M1", "audit").type, AUDIT);
+});
+
+test("an audit comes after other open work, whatever its number", () => {
+  const issues = [issue(2, "M1 Core", AUDIT), issue(9, "M1 Core")];
+  assert.equal(pickNext(issues)[1][0].number, 9);
+});
+
+test("a blocked issue does not delay the audit", () => {
+  const issues = [issue(2, "M1 Core", AUDIT), issue(3, "M1 Core", "status: blocked")];
+  assert.deepEqual(pickNext(issues), ["start", [issues[0]]]);
+});
+
+test("the audit comes before the checkpoint", () => {
+  const issues = [
+    issue(1, "M1 Core", "type: checkpoint", "status: blocked"),
+    issue(8, "M1 Core", AUDIT),
+  ];
+  assert.deepEqual(pickNext(issues), ["start", [issues[1]]]);
+});
+
+test("a blocked audit stops as blocked, not at the checkpoint", () => {
+  const issues = [
+    issue(1, "M1 Core", "type: checkpoint", "status: blocked"),
+    issue(8, "M1 Core", AUDIT, "status: blocked"),
+  ];
+  assert.deepEqual(pickNext(issues), ["blocked", issues]);
+});
+
+test("without an audit the checkpoint still comes last", () => {
+  const issues = [issue(1, "M1 Core", "type: checkpoint", "status: blocked")];
+  assert.deepEqual(pickNext(issues), ["checkpoint", [issues[0]]]);
+});
+
+const triaged = (n, milestone = null) => issue(n, milestone, "status: triage");
+
+test("more than the triage limit stops for triage", () => {
+  assert.equal(TRIAGE_LIMIT, 3);
+  const issues = [
+    triaged(9),
+    triaged(2),
+    triaged(5, "M0 Foundation"),
+    triaged(7),
+    issue(1, "M0 Foundation"),
+  ];
+  const [action, picked] = pickNext(issues);
+  assert.equal(action, "triage");
+  assert.deepEqual(
+    picked.map((i) => i.number),
+    [2, 5, 7, 9],
+  );
+});
+
+test("exactly the triage limit does not stop", () => {
+  const issues = [triaged(2), triaged(3), triaged(4), issue(1, "M0 Foundation")];
+  assert.equal(pickNext(issues)[0], "start");
+});
+
+test("an issue in progress is resumed even above the triage limit", () => {
+  const issues = [
+    triaged(2),
+    triaged(3),
+    triaged(4),
+    triaged(5),
+    issue(7, "M0 Foundation", "status: in progress"),
+  ];
+  assert.equal(pickNext(issues)[0], "resume");
+});
+
+test("the triage stop applies even when nothing is planned", () => {
+  const issues = [triaged(2), triaged(3), triaged(4), triaged(5)];
+  assert.equal(pickNext(issues)[0], "triage");
+});
+
+test("pause returns an audit in progress to ready", () => {
+  assert.deepEqual(pauseChanges(issue(4, "M1 Core", AUDIT, "status: in progress")), {
+    add: ["status: ready"],
+    remove: ["status: in progress"],
+  });
+});
+
+test("pause refuses a closed issue, a non-audit and an issue not in progress", () => {
+  const closed = { ...issue(4, "M1 Core", AUDIT, "status: in progress"), state: "CLOSED" };
+  assert.match(pauseChanges(closed).error, /closed/);
+  assert.match(pauseChanges(issue(4, "M1 Core", "status: in progress")).error, /not an audit/);
+  assert.match(pauseChanges(issue(4, "M1 Core", AUDIT, "status: ready")).error, /not in progress/);
 });

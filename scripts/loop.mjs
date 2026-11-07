@@ -14,6 +14,8 @@
 //   plan N M<k> [TYPE]  Plan a triaged issue: milestone M<k>, status ready (a blocked issue
 //                     stays blocked; `unblock` lifts it), optional type.
 //   unblock N         Lift the blocked label (never on a checkpoint) and mark it ready.
+//   pause N           Return an audit in progress to ready, so the issues its findings
+//                     opened are picked before its re-audit.
 
 import { spawnSync } from "node:child_process";
 
@@ -29,7 +31,11 @@ const READY = "status: ready";
 const BLOCKED = "status: blocked";
 const CHECKPOINT = "type: checkpoint";
 const TRIAGE = "status: triage";
-const TYPES = ["bug", "feature", "chore", "docs", "spike"];
+const AUDIT = "type: audit";
+const TYPES = ["bug", "feature", "chore", "docs", "spike", "audit"];
+
+/** More than this many open issues with `status: triage` stop the loop for a triage session. */
+export const TRIAGE_LIMIT = 3;
 
 // ---------------------------------------------------------------- pure logic
 
@@ -53,28 +59,37 @@ const byNumber = (a, b) => a.number - b.number;
  *
  * Returns [action, issues]:
  *   ["resume", [issue]]      an issue is already in progress
- *   ["start", [issue]]       the next issue to start
+ *   ["start", [issue]]       the next issue to start (an audit only when no other open work is
+ *                            ready in the milestone)
+ *   ["triage", issues]       more than TRIAGE_LIMIT open issues await triage: stop and ask the
+ *                            maintainer for a triage session (checked after "resume", before the rest)
  *   ["checkpoint", [issue]]  only a checkpoint is left in the milestone: stop for the maintainer
- *   ["blocked", issues]      every open issue in the earliest milestone is blocked
+ *   ["blocked", issues]      every open issue in the earliest milestone is blocked, or only
+ *                            blocked work and an open audit are left (no checkpoint before its audit)
  *   ["empty", []]            no open issue with a milestone
  */
 export function pickNext(issues) {
   const inProgress = issues.filter((i) => labelsOf(i).has(IN_PROGRESS)).sort(byNumber);
   if (inProgress.length > 0) return ["resume", [inProgress[0]]];
 
+  const triage = issues.filter((i) => labelsOf(i).has(TRIAGE)).sort(byNumber);
+  if (triage.length > TRIAGE_LIMIT) return ["triage", triage];
+
   const planned = issues.filter((i) => milestoneRank(i) !== null);
   if (planned.length === 0) return ["empty", []];
 
   const earliest = Math.min(...planned.map(milestoneRank));
   const current = planned.filter((i) => milestoneRank(i) === earliest).sort(byNumber);
-  // Checkpoints always come last within their milestone, whatever their number.
-  for (const issue of current) {
-    const names = labelsOf(issue);
-    if (!names.has(CHECKPOINT) && !names.has(BLOCKED)) return ["start", [issue]];
-  }
-  for (const issue of current) {
-    if (labelsOf(issue).has(CHECKPOINT)) return ["checkpoint", [issue]];
-  }
+  // Within a milestone: other work, then the audit, then the checkpoint, whatever the numbers.
+  const open = (i) => !labelsOf(i).has(BLOCKED);
+  const has = (label) => (i) => labelsOf(i).has(label);
+  const work = current.find((i) => open(i) && !has(CHECKPOINT)(i) && !has(AUDIT)(i));
+  if (work) return ["start", [work]];
+  const audit = current.find((i) => open(i) && has(AUDIT)(i));
+  if (audit) return ["start", [audit]];
+  if (current.some(has(AUDIT))) return ["blocked", current];
+  const checkpoint = current.find(has(CHECKPOINT));
+  if (checkpoint) return ["checkpoint", [checkpoint]];
   return ["blocked", current];
 }
 
@@ -150,6 +165,17 @@ export function unblockChanges(issue) {
   }
   if (!names.has(BLOCKED)) return { error: `Issue #${issue.number} is not blocked.` };
   return { add: [READY], remove: [BLOCKED] };
+}
+
+/** What `pause` changes on an audit in progress (pure). Returns { add, remove } or { error }. */
+export function pauseChanges(issue) {
+  const names = labelsOf(issue);
+  if (issue.state !== undefined && issue.state !== "OPEN") {
+    return { error: `Issue #${issue.number} is closed.` };
+  }
+  if (!names.has(AUDIT)) return { error: `Issue #${issue.number} is not an audit.` };
+  if (!names.has(IN_PROGRESS)) return { error: `Issue #${issue.number} is not in progress.` };
+  return { add: [READY], remove: [IN_PROGRESS] };
 }
 
 // ---------------------------------------------------------------- GitHub / git
@@ -285,6 +311,11 @@ function cmdStatus() {
 
   if (action === "empty") {
     console.log("NEXT: nothing planned. No open issue has a milestone.");
+  } else if (action === "triage") {
+    console.log(
+      `NEXT: stop for triage. ${picked.length} open issues have status: triage (more than ${TRIAGE_LIMIT}); ask the maintainer for a triage session:`,
+    );
+    for (const issue of picked) console.log(`  #${issue.number} ${issue.title}`);
   } else if (action === "blocked") {
     console.log("NEXT: stop. Every open issue in the earliest milestone is blocked:");
     for (const issue of picked) console.log(`  #${issue.number} ${issue.title}`);
@@ -374,6 +405,14 @@ function cmdUnblock(number) {
   console.log(`unblock #${number} -> ok`);
 }
 
+function cmdPause(number) {
+  const changes = pauseChanges(viewIssue(number));
+  if (changes.error) throw new Refusal(changes.error);
+  editLabels(number, changes);
+  setStatus(number, "todo");
+  console.log(`pause #${number} -> ok`);
+}
+
 const USAGE = `Usage: node scripts/loop.mjs <command>
 
   status            What "continue" should do now, plus local checks.
@@ -384,8 +423,10 @@ const USAGE = `Usage: node scripts/loop.mjs <command>
   add N             Add issue N to the board as Todo.
   plan N M<k> [TYPE]  Plan a triaged issue: milestone M<k>, status ready (a blocked issue
                     stays blocked until unblock), and optionally its type (bug,
-                    feature, chore, docs or spike).
-  unblock N         Lift the blocked label (never on a checkpoint) and mark it ready.`;
+                    feature, chore, docs, spike or audit).
+  unblock N         Lift the blocked label (never on a checkpoint) and mark it ready.
+  pause N           Return an audit in progress to ready, so the issues its findings
+                    opened are picked before its re-audit.`;
 
 function usageError(message) {
   console.error(`${message}\n\n${USAGE}`);
@@ -405,6 +446,7 @@ export function main(argv) {
     finish: { args: [0, 0], run: (n) => cmdFinish(n) },
     add: { args: [0, 0], run: (n) => cmdAdd(n) },
     unblock: { args: [0, 0], run: (n) => cmdUnblock(n) },
+    pause: { args: [0, 0], run: (n) => cmdPause(n) },
     block: { args: [1, 1], run: (n, t) => cmdBlock(n, t) },
     comment: { args: [1, 1], run: (n, t) => cmdComment(n, t) },
     plan: { args: [1, 2], run: (n, m, t) => cmdPlan(n, m, t) },
